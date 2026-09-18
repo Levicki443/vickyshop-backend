@@ -5,8 +5,14 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { config } from './config/environment.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '../../');
 
 const app = express();
 
@@ -51,7 +57,12 @@ if (!config.isProduction) {
   app.use(morgan('dev'));
 }
 
-// 6. Montage des routes de l'API
+// 6. Fichiers multimédias statiques
+app.use('/photo', express.static(path.join(rootDir, 'photo')));
+app.use('/image 1 pulle & chapeau', express.static(path.join(rootDir, 'image 1 pulle & chapeau')));
+app.use('/image 2 complet d habit', express.static(path.join(rootDir, 'image 2 complet d habit')));
+
+// 7. Montage des routes de l'API
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'success',

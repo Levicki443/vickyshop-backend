@@ -4,11 +4,12 @@ import {
   getProductById,
   createProduct,
 } from '../controllers/productController.js';
+import { sanitizeSearchParams } from '../middlewares/validationMiddleware.js';
 
 const router = Router();
 
 router.route('/')
-  .get(getProducts)
+  .get(sanitizeSearchParams, getProducts)
   .post(createProduct);
 
 router.route('/:id')
