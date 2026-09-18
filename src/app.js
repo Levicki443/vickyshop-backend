@@ -1,0 +1,93 @@
+import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
+import { config } from './config/environment.js';
+
+import productRoutes from './routes/productRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
+
+const app = express();
+
+// 1. Sécurité des en-têtes HTTP
+app.use(helmet());
+
+// 2. Configuration CORS sécurisée
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Autorise les requêtes sans origine (applications mobiles, curl, etc.) en développement
+      if (!origin || config.cors.allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Accès non autorisé par la politique CORS'), false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
+
+// 3. Limitation du débit (Rate Limiting)
+const limiter = rateLimit({
+  windowMs: config.rateLimit.windowMs,
+  max: config.rateLimit.maxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: 429,
+    message: 'Trop de requêtes effectuées depuis cette adresse IP, veuillez réessayer plus tard.',
+  },
+});
+app.use('/api', limiter);
+
+// 4. Analyseurs de corps de requête (avec limite de taille stricte)
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// 5. Journalisation des requêtes
+if (!config.isProduction) {
+  app.use(morgan('dev'));
+}
+
+// 6. Montage des routes de l'API
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'success',
+    message: 'API Vicky-Shop opérationnelle',
+    environment: config.env,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.use('/api/products', productRoutes);
+app.use('/api/orders', orderRoutes);
+
+// 7. Gestion des routes non trouvées (404)
+app.use((req, res, next) => {
+  res.status(404).json({
+    status: 'error',
+    code: 404,
+    message: `La ressource demandée (${req.originalUrl}) est introuvable sur ce serveur.`,
+  });
+});
+
+// 8. Gestionnaire centralisé des erreurs (Standard Production)
+app.use((err, req, res, next) => {
+  const statusCode = err.statusCode || 500;
+  const response = {
+    status: 'error',
+    code: statusCode,
+    message: err.message || 'Une erreur interne est survenue sur le serveur.',
+  };
+
+  // En développement uniquement, inclure des informations supplémentaires
+  if (!config.isProduction && err.stack) {
+    response.stack = err.stack;
+  }
+
+  res.status(statusCode).json(response);
+});
+
+export default app;
