@@ -109,7 +109,6 @@ const orderSchema = new mongoose.Schema(
   }
 );
 
-orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ customerPhone: 1 });
 
 export const Order = mongoose.model('Order', orderSchema);
