@@ -20,21 +20,41 @@ const app = express();
 // 1. Sécurité des en-têtes HTTP
 app.use(helmet());
 
-// 2. Configuration CORS sécurisée
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Autorise les requêtes sans origine (applications mobiles, curl, etc.) en développement
-      if (!origin || config.cors.allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error('Accès non autorisé par la politique CORS'), false);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+// 2. Configuration CORS sécurisée et dynamique
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Autorise les requêtes sans origine (applications mobiles, curl, Postman, Render health-checks)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+
+    // Vérifie si l'origine est dans la liste ALLOW_ORIGINS ou si '*' est présent
+    const isAllowed =
+      config.cors.allowedOrigins.includes('*') ||
+      config.cors.allowedOrigins.includes(origin) ||
+      config.cors.allowedOrigins.includes(normalizedOrigin);
+
+    if (isAllowed) {
+      return callback(null, true);
+    }
+
+    // Autorise également localhost et 127.0.0.1 sur n'importe quel port en dev
+    if (!config.isProduction && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`[CORS] Origine bloquée : "${origin}". Origines autorisées :`, config.cors.allowedOrigins);
+    return callback(new Error(`Origine ${origin} non autorisée par la politique CORS`), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // 3. Limitation du débit (Rate Limiting)
 const limiter = rateLimit({

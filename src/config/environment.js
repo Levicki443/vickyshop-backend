@@ -13,9 +13,17 @@ export const config = {
   port: parseInt(process.env.PORT || '5000', 10),
   
   cors: {
-    allowedOrigins: process.env.CORS_ORIGIN 
-      ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()) 
-      : ['http://localhost:3000', 'http://127.0.0.1:5500', 'http://localhost:5173'],
+    allowedOrigins: (process.env.ALLOW_ORIGINS || process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN)
+      ? (process.env.ALLOW_ORIGINS || process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN)
+          .split(',')
+          .map((origin) => origin.trim().replace(/\/+$/, ''))
+          .filter(Boolean)
+      : [
+          'http://localhost:3000',
+          'http://127.0.0.1:5500',
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+        ],
   },
 
   database: {

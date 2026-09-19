@@ -9,12 +9,13 @@ const startServer = async () => {
   // Connexion à la base de données
   await connectDatabase();
 
-  // Démarrage de l'écoute HTTP
-  const server = app.listen(config.port, () => {
+  // Démarrage de l'écoute HTTP (0.0.0.0 pour compatibilité totale Render/Cloud)
+  const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`====================================================`);
     console.log(`🚀 Serveur Vicky-Shop démarré sur le port : ${config.port}`);
     console.log(`🌍 Environnement : ${config.env}`);
-    console.log(`🔗 Point de santé : http://localhost:${config.port}/api/health`);
+    console.log(`🔗 Point de santé : /api/health`);
+    console.log(`🔒 Origines CORS autorisées : ${config.cors.allowedOrigins.join(', ')}`);
     console.log(`====================================================`);
   });
 
