@@ -35,8 +35,12 @@ export const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   },
 
+  admin: {
+    secretKey: process.env.ADMIN_REGISTRATION_SECRET || 'vicky_admin_secret_key_2026_abidjan_master',
+  },
+
   rateLimit: {
     windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: process.env.NODE_ENV === 'production' ? 100 : 1000, // Requêtes max par fenêtre
+    maxRequests: process.env.NODE_ENV === 'production' ? 100 : 1000, // Requetes max par fenetre
   },
 };

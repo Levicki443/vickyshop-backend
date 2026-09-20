@@ -10,6 +10,8 @@ import { fileURLToPath } from 'url';
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import { ShopSettings } from './models/ShopSettings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,13 +42,19 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // Autorise également localhost et 127.0.0.1 sur n'importe quel port en dev
-    if (!config.isProduction && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    // Autorise automatiquement toutes les connexions locales & réseau local Wi-Fi (localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x, 172.x.x.x)
+    const isLocalOrNetworkIP = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
+    if (isLocalOrNetworkIP) {
+      return callback(null, true);
+    }
+
+    // Fallback permissif si la liste d'origines est vide
+    if (config.cors.allowedOrigins.length === 0) {
       return callback(null, true);
     }
 
     console.warn(`[CORS] Origine bloquée : "${origin}". Origines autorisées :`, config.cors.allowedOrigins);
-    return callback(new Error(`Origine ${origin} non autorisée par la politique CORS`), false);
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -96,6 +104,20 @@ app.get('/api/health', (req, res) => {
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+
+// Route publique pour les parametres de la boutique (banniere, code promo, etc.)
+app.get('/api/settings', async (req, res, next) => {
+  try {
+    const settings = await ShopSettings.getSettings();
+    res.status(200).json({
+      status: 'success',
+      data: { settings },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // 7. Gestion des routes non trouvées (404)
 app.use((req, res, next) => {

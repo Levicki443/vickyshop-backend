@@ -12,10 +12,10 @@ const startServer = async () => {
   // Démarrage de l'écoute HTTP (0.0.0.0 pour compatibilité totale Render/Cloud)
   const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`====================================================`);
-    console.log(`🚀 Serveur Vicky-Shop démarré sur le port : ${config.port}`);
-    console.log(`🌍 Environnement : ${config.env}`);
-    console.log(`🔗 Point de santé : /api/health`);
-    console.log(`🔒 Origines CORS autorisées : ${config.cors.allowedOrigins.join(', ')}`);
+    console.log(`[SERVEUR] Vicky-Shop demarre sur le port : ${config.port}`);
+    console.log(`[SERVEUR] Environnement : ${config.env}`);
+    console.log(`[SERVEUR] Point de sante : /api/health`);
+    console.log(`[SERVEUR] Origines CORS autorisees : ${config.cors.allowedOrigins.join(', ')}`);
     console.log(`====================================================`);
   });
 

@@ -36,13 +36,27 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    // Transmission de l'utilisateur à la requête
+    // Transmission de l'utilisateur a la requete
     req.user = currentUser;
     next();
   } catch (error) {
     return res.status(401).json({
       status: 'error',
-      message: 'Jeton d\'authentification invalide ou expiré.',
+      message: 'Jeton d\'authentification invalide ou expire.',
     });
   }
 };
+
+/**
+ * Middleware strict reservant l'acces aux utilisateurs ayant le role admin.
+ */
+export const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Acces refuse. Vous devez disposer des privileges administrateur pour cette ressource.',
+    });
+  }
+  next();
+};
+
