@@ -36,7 +36,7 @@ export const config = {
   },
 
   admin: {
-    secretKey: process.env.ADMIN_REGISTRATION_SECRET || 'vicky_admin_secret_key_2026_abidjan_master',
+    secretKey: (process.env.AD_PW || process.env.ADMIN_REGISTRATION_SECRET || process.env.ADMIN_SECRET_KEY || process.env.ADMIN_SECRET || 'vicky_admin_secret_key_2026_abidjan_master').trim(),
   },
 
   rateLimit: {
