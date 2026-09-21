@@ -91,8 +91,8 @@ app.use('/photo', express.static(path.join(rootDir, 'photo')));
 app.use('/image 1 pulle & chapeau', express.static(path.join(rootDir, 'image 1 pulle & chapeau')));
 app.use('/image 2 complet d habit', express.static(path.join(rootDir, 'image 2 complet d habit')));
 
-// 7. Montage des routes de l'API
-app.get('/api/health', (req, res) => {
+// 7. Montage des routes de l'API & Healthcheck
+app.get(['/', '/health', '/api/health'], (req, res) => {
   res.status(200).json({
     status: 'success',
     message: 'API Vicky-Shop opérationnelle',
