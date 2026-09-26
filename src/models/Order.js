@@ -1,11 +1,14 @@
 import mongoose from 'mongoose';
 
 /**
- * Schéma Mongoose pour les Commandes (Orders) de Vicky-Shop.
- * Gère les articles achetés, le client, l'adresse de livraison et le moyen de paiement (Wave, OM, MoMo, etc.).
+ * Schéma Mongoose pour les Articles d'une Commande.
  */
 const orderItemSchema = new mongoose.Schema(
   {
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+    },
     title: {
       type: String,
       required: true,
@@ -25,10 +28,21 @@ const orderItemSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    size: {
+      type: String,
+      default: '',
+    },
+    color: {
+      type: String,
+      default: '',
+    },
   },
   { _id: false }
 );
 
+/**
+ * Schéma Mongoose pour les Commandes (Orders) de Vicky-Shop.
+ */
 const orderSchema = new mongoose.Schema(
   {
     orderNumber: {
@@ -36,6 +50,7 @@ const orderSchema = new mongoose.Schema(
       required: true,
       unique: true,
       trim: true,
+      index: true,
     },
     customerName: {
       type: String,
@@ -46,6 +61,7 @@ const orderSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Le numéro de téléphone est requis'],
       trim: true,
+      index: true,
     },
     customerEmail: {
       type: String,
@@ -61,6 +77,11 @@ const orderSchema = new mongoose.Schema(
     city: {
       type: String,
       default: 'Abidjan',
+      trim: true,
+    },
+    deliveryNotes: {
+      type: String,
+      default: '',
       trim: true,
     },
     items: {
@@ -91,7 +112,8 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: {
       type: String,
       required: [true, 'Le moyen de paiement est requis'],
-      enum: ['wave', 'orange-money', 'mtn-momo', 'carte', 'livraison'],
+      enum: ['wave', 'orange-money', 'orange', 'mtn-momo', 'mtn', 'carte', 'livraison', 'cash'],
+      default: 'livraison',
     },
     paymentStatus: {
       type: String,
@@ -102,13 +124,42 @@ const orderSchema = new mongoose.Schema(
       type: String,
       enum: ['recue', 'en_preparation', 'en_livraison', 'livree', 'annulee'],
       default: 'recue',
+      index: true,
     },
+    statusHistory: [
+      {
+        status: { type: String, required: true },
+        updatedAt: { type: Date, default: Date.now },
+        comment: { type: String, default: '' },
+      },
+    ],
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 
-orderSchema.index({ customerPhone: 1 });
+// Virtuals de compatibilité pour le frontend
+orderSchema.virtual('customer').get(function () {
+  return {
+    name: this.customerName,
+    phone: this.customerPhone,
+    email: this.customerEmail,
+  };
+});
+
+orderSchema.virtual('deliveryDetails').get(function () {
+  return {
+    address: this.deliveryAddress,
+    city: this.city,
+    notes: this.deliveryNotes,
+  };
+});
+
+orderSchema.virtual('discountAmount').get(function () {
+  return this.discount;
+});
 
 export const Order = mongoose.model('Order', orderSchema);

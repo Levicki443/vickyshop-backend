@@ -2,6 +2,8 @@ import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
 import { User } from '../models/User.js';
 import { ShopSettings } from '../models/ShopSettings.js';
+import { notifyAdmins, notifyOrderUpdate } from '../config/socket.js';
+import { sendOrderStatusUpdateEmail } from '../services/emailService.js';
 
 /**
  * Controleur principal du Backoffice Administrateur pour Vicky-Shop.
@@ -182,12 +184,39 @@ export const getAllOrders = async (req, res, next) => {
 };
 
 /**
- * Met a jour le statut d'une commande et de son paiement.
+ * Réintègre le stock des produits si une commande est annulée / refusée.
+ */
+const restoreProductsStock = async (items) => {
+  if (!items || !Array.isArray(items)) return;
+  for (const item of items) {
+    try {
+      let product = null;
+      if (item.productId) {
+        product = await Product.findById(item.productId);
+      }
+      if (!product && item.title) {
+        product = await Product.findOne({ title: item.title });
+      }
+      if (product) {
+        product.stockQuantity = (product.stockQuantity || 0) + item.quantity;
+        if (product.stockQuantity > 0) {
+          product.inStock = true;
+        }
+        await product.save();
+      }
+    } catch (err) {
+      console.error(`[Stock] Erreur réintégration stock pour ${item.title} :`, err.message);
+    }
+  }
+};
+
+/**
+ * Met à jour le statut d'une commande et de son paiement avec historique, stock et alertes.
  */
 export const updateOrderStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { orderStatus, paymentStatus } = req.body;
+    const { orderStatus, paymentStatus, comment } = req.body;
 
     const order = await Order.findById(id);
     if (!order) {
@@ -197,8 +226,36 @@ export const updateOrderStatus = async (req, res, next) => {
       });
     }
 
+    const previousStatus = order.orderStatus;
+
     if (orderStatus) {
       order.orderStatus = orderStatus;
+
+      // Si la commande passe à "livrée" et moyen de paiement cash, valider le paiement
+      if (
+        orderStatus === 'livree' &&
+        !paymentStatus &&
+        (order.paymentMethod === 'livraison' || order.paymentMethod === 'cash')
+      ) {
+        order.paymentStatus = 'paye';
+      }
+
+      // Si la commande est annulée / refusée, remettre les articles en stock
+      if (orderStatus === 'annulee' && previousStatus !== 'annulee') {
+        restoreProductsStock(order.items).catch((err) =>
+          console.error('[Admin] Erreur réintégration stock :', err)
+        );
+      }
+
+      // Enregistrement dans l'historique
+      if (!order.statusHistory) {
+        order.statusHistory = [];
+      }
+      order.statusHistory.push({
+        status: orderStatus,
+        updatedAt: new Date(),
+        comment: comment || `Statut passé de '${previousStatus}' à '${orderStatus}' par l'administration.`,
+      });
     }
 
     if (paymentStatus) {
@@ -207,9 +264,24 @@ export const updateOrderStatus = async (req, res, next) => {
 
     await order.save();
 
+    // 1. Diffusion en temps réel vers le Dashboard Admin
+    try {
+      notifyAdmins('order:updated', order);
+      notifyOrderUpdate(order.orderNumber, 'order:updated', order);
+    } catch (socketErr) {
+      console.warn('[Socket.IO] Erreur notification update :', socketErr.message);
+    }
+
+    // 2. Notification Brevo au client si le statut a changé
+    if (orderStatus && orderStatus !== previousStatus && order.customerEmail) {
+      sendOrderStatusUpdateEmail(order, orderStatus).catch((err) => {
+        console.error('[Email] Échec envoi email mise à jour statut :', err.message);
+      });
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Statut de la commande mis a jour avec succes.',
+      message: 'Statut de la commande mis à jour avec succès.',
       data: {
         order,
       },

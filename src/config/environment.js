@@ -43,4 +43,10 @@ export const config = {
     windowMs: 15 * 60 * 1000, // 15 minutes
     maxRequests: process.env.NODE_ENV === 'production' ? 100 : 1000, // Requetes max par fenetre
   },
+
+  brevo: {
+    apiKey: (process.env.BREVO_API_KEY || process.env.SENDINBLUE_API_KEY || '').trim(),
+    senderEmail: (process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'contact@vickyshop.ci').trim(),
+    senderName: (process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Vicky-Shop Abidjan').trim(),
+  },
 };

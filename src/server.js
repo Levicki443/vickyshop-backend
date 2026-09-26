@@ -1,21 +1,30 @@
+import http from 'http';
 import app from './app.js';
 import { config } from './config/environment.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
+import { initSocket } from './config/socket.js';
 
 /**
- * Initialisation du serveur HTTP et de la base de données.
+ * Initialisation du serveur HTTP, de Socket.IO et de la base de données.
  */
 const startServer = async () => {
   // Connexion à la base de données
   await connectDatabase();
 
+  // Création du serveur HTTP natif avec Express
+  const httpServer = http.createServer(app);
+
+  // Initialisation de Socket.IO
+  initSocket(httpServer);
+
   // Démarrage de l'écoute HTTP (0.0.0.0 pour compatibilité totale Render/Cloud)
-  const server = app.listen(config.port, '0.0.0.0', () => {
+  const server = httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`====================================================`);
-    console.log(`[SERVEUR] Vicky-Shop demarre sur le port : ${config.port}`);
+    console.log(`[SERVEUR] Vicky-Shop démarré sur le port : ${config.port}`);
     console.log(`[SERVEUR] Environnement : ${config.env}`);
-    console.log(`[SERVEUR] Point de sante : /api/health`);
-    console.log(`[SERVEUR] Origines CORS autorisees : ${config.cors.allowedOrigins.join(', ')}`);
+    console.log(`[SERVEUR] WebSocket : Socket.IO actif`);
+    console.log(`[SERVEUR] Point de santé : /api/health`);
+    console.log(`[SERVEUR] Origines CORS autorisées : ${config.cors.allowedOrigins.join(', ')}`);
     console.log(`====================================================`);
   });
 
