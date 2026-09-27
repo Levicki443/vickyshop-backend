@@ -1,6 +1,6 @@
 import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
-import { notifyAdmins } from '../config/socket.js';
+import { notifyAdmins, notifyProductStock, notifyProductUpdated } from '../config/socket.js';
 import { sendOrderConfirmationEmail } from '../services/emailService.js';
 
 /**
@@ -16,6 +16,7 @@ const generateOrderNumber = () => {
 
 /**
  * Déduit le stock des produits commandés et bascule inStock si rupture.
+ * Émet également les événements Socket.IO pour une répercussion instantanée.
  */
 const deductProductsStock = async (items) => {
   if (!items || !Array.isArray(items)) return;
@@ -37,6 +38,14 @@ const deductProductsStock = async (items) => {
           product.inStock = false;
         }
         await product.save();
+
+        // Notification instantanée vers tous les clients publics et admins
+        try {
+          notifyProductStock(product._id, product.stockQuantity, product.inStock);
+          notifyProductUpdated(product);
+        } catch (sErr) {
+          console.warn('[Socket.IO] Erreur notification stock:', sErr.message);
+        }
       }
     } catch (err) {
       console.error(`[Stock] Erreur mise à jour stock pour ${item.title} :`, err.message);

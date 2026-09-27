@@ -2,8 +2,16 @@ import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
 import { User } from '../models/User.js';
 import { ShopSettings } from '../models/ShopSettings.js';
-import { notifyAdmins, notifyOrderUpdate } from '../config/socket.js';
+import {
+  notifyAdmins,
+  notifyOrderUpdate,
+  notifyProductCreated,
+  notifyProductUpdated,
+  notifyProductDeleted,
+  notifyProductStock,
+} from '../config/socket.js';
 import { sendOrderStatusUpdateEmail } from '../services/emailService.js';
+import { uploadBufferToCloudinary } from '../services/cloudinaryService.js';
 
 /**
  * Controleur principal du Backoffice Administrateur pour Vicky-Shop.
@@ -203,6 +211,13 @@ const restoreProductsStock = async (items) => {
           product.inStock = true;
         }
         await product.save();
+
+        try {
+          notifyProductStock(product._id, product.stockQuantity, product.inStock);
+          notifyProductUpdated(product);
+        } catch (sErr) {
+          console.warn('[Socket.IO] Erreur notification stock restore:', sErr.message);
+        }
       }
     } catch (err) {
       console.error(`[Stock] Erreur réintégration stock pour ${item.title} :`, err.message);
@@ -292,15 +307,89 @@ export const updateOrderStatus = async (req, res, next) => {
 };
 
 /**
+ * Téléverse une image de produit vers Cloudinary.
+ */
+export const uploadProductImage = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Aucun fichier image fourni.',
+      });
+    }
+
+    const result = await uploadBufferToCloudinary(
+      req.file.buffer,
+      req.file.originalname,
+      'products'
+    );
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Image téléversée avec succès sur Cloudinary.',
+      data: {
+        url: result.secure_url,
+        secure_url: result.secure_url,
+        public_id: result.public_id,
+        width: result.width,
+        height: result.height,
+        format: result.format,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Téléverse plusieurs images de produit vers Cloudinary (galerie).
+ */
+export const uploadMultipleProductImages = async (req, res, next) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Aucun fichier image fourni.',
+      });
+    }
+
+    const uploadPromises = req.files.map((file) =>
+      uploadBufferToCloudinary(file.buffer, file.originalname, 'products')
+    );
+    const results = await Promise.all(uploadPromises);
+
+    res.status(200).json({
+      status: 'success',
+      message: `${results.length} images téléversées avec succès sur Cloudinary.`,
+      data: {
+        images: results.map((r) => r.secure_url),
+        details: results,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Recupere la liste des produits avec options d'administration.
  */
 export const getAllProducts = async (req, res, next) => {
   try {
-    const { category, search } = req.query;
+    const { category, search, stockStatus } = req.query;
     const query = {};
 
     if (category && category !== 'all') {
       query.category = category.toLowerCase();
+    }
+
+    if (stockStatus === 'low') {
+      query.stockQuantity = { $gt: 0, $lte: 5 };
+    } else if (stockStatus === 'out') {
+      query.$or = [{ inStock: false }, { stockQuantity: { $lte: 0 } }];
+    } else if (stockStatus === 'in') {
+      query.inStock = true;
+      query.stockQuantity = { $gt: 0 };
     }
 
     if (search && search.trim()) {
@@ -323,7 +412,7 @@ export const getAllProducts = async (req, res, next) => {
 };
 
 /**
- * Cree un nouveau produit dans le catalogue.
+ * Cree un nouveau produit dans le catalogue et diffuse en direct via Socket.IO.
  */
 export const createProduct = async (req, res, next) => {
   try {
@@ -334,26 +423,54 @@ export const createProduct = async (req, res, next) => {
       originalPrice,
       category,
       image,
+      images,
+      colors,
+      sizes,
       badge,
       inStock,
       stockQuantity,
+      lowStockThreshold,
+      featured,
     } = req.body;
+
+    const qty = stockQuantity !== undefined ? Number(stockQuantity) : 10;
+    const isAvailable = inStock !== undefined ? Boolean(inStock) && qty > 0 : qty > 0;
+
+    const parseArray = (val) => {
+      if (Array.isArray(val)) return val;
+      if (typeof val === 'string' && val.trim()) {
+        return val.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      return [];
+    };
 
     const product = await Product.create({
       title,
       description: description || '',
       price: Number(price),
       originalPrice: originalPrice ? Number(originalPrice) : null,
-      category: category ? category.toLowerCase() : 'vetements',
+      category: category ? category.toLowerCase().trim() : 'vetements',
       image,
+      images: Array.isArray(images) ? images : [],
+      colors: parseArray(colors),
+      sizes: parseArray(sizes),
       badge: badge || null,
-      inStock: inStock !== undefined ? Boolean(inStock) : true,
-      stockQuantity: stockQuantity !== undefined ? Number(stockQuantity) : 10,
+      inStock: isAvailable,
+      stockQuantity: qty,
+      lowStockThreshold: lowStockThreshold ? Number(lowStockThreshold) : 5,
+      featured: Boolean(featured),
     });
+
+    // 1. Diffusion instantanée Socket.IO vers tous les clients (Public + Admin)
+    try {
+      notifyProductCreated(product);
+    } catch (socketErr) {
+      console.warn('[Socket.IO] Erreur broadcast create product :', socketErr.message);
+    }
 
     res.status(201).json({
       status: 'success',
-      message: 'Produit ajoute avec succes au catalogue.',
+      message: 'Produit ajouté avec succès et synchronisé en direct sur la boutique.',
       data: {
         product,
       },
@@ -364,15 +481,15 @@ export const createProduct = async (req, res, next) => {
 };
 
 /**
- * Met a jour un produit existant.
+ * Met a jour un produit existant et diffuse en direct via Socket.IO.
  */
 export const updateProduct = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
 
     if (updates.category) {
-      updates.category = updates.category.toLowerCase();
+      updates.category = updates.category.toLowerCase().trim();
     }
     if (updates.price !== undefined) {
       updates.price = Number(updates.price);
@@ -382,6 +499,16 @@ export const updateProduct = async (req, res, next) => {
     }
     if (updates.stockQuantity !== undefined) {
       updates.stockQuantity = Number(updates.stockQuantity);
+      if (updates.stockQuantity <= 0) {
+        updates.inStock = false;
+        updates.stockQuantity = 0;
+      }
+    }
+    if (typeof updates.colors === 'string') {
+      updates.colors = updates.colors.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    if (typeof updates.sizes === 'string') {
+      updates.sizes = updates.sizes.split(',').map((s) => s.trim()).filter(Boolean);
     }
 
     const product = await Product.findByIdAndUpdate(id, updates, {
@@ -396,9 +523,17 @@ export const updateProduct = async (req, res, next) => {
       });
     }
 
+    // 1. Diffusion instantanée Socket.IO vers tous les clients
+    try {
+      notifyProductUpdated(product);
+      notifyProductStock(product._id, product.stockQuantity, product.inStock);
+    } catch (socketErr) {
+      console.warn('[Socket.IO] Erreur broadcast update product :', socketErr.message);
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Produit mis a jour avec succes.',
+      message: 'Produit mis à jour avec succès et synchronisé en direct.',
       data: {
         product,
       },
@@ -409,7 +544,7 @@ export const updateProduct = async (req, res, next) => {
 };
 
 /**
- * Supprime un produit du catalogue.
+ * Supprime un produit du catalogue et diffuse en direct via Socket.IO.
  */
 export const deleteProduct = async (req, res, next) => {
   try {
@@ -423,9 +558,16 @@ export const deleteProduct = async (req, res, next) => {
       });
     }
 
+    // 1. Diffusion instantanée Socket.IO vers tous les clients
+    try {
+      notifyProductDeleted(id);
+    } catch (socketErr) {
+      console.warn('[Socket.IO] Erreur broadcast delete product :', socketErr.message);
+    }
+
     res.status(200).json({
       status: 'success',
-      message: 'Produit supprime du catalogue avec succes.',
+      message: 'Produit supprimé du catalogue avec succès.',
     });
   } catch (error) {
     next(error);
@@ -433,7 +575,7 @@ export const deleteProduct = async (req, res, next) => {
 };
 
 /**
- * Bascule la disponibilite en stock d'un produit en un clic.
+ * Bascule la disponibilite en stock d'un produit en un clic et synchronise.
  */
 export const toggleProductStock = async (req, res, next) => {
   try {
@@ -448,11 +590,25 @@ export const toggleProductStock = async (req, res, next) => {
     }
 
     product.inStock = !product.inStock;
+    if (product.inStock && product.stockQuantity === 0) {
+      product.stockQuantity = 5;
+    } else if (!product.inStock) {
+      product.stockQuantity = 0;
+    }
+
     await product.save();
+
+    // 1. Diffusion instantanée Socket.IO vers tous les clients
+    try {
+      notifyProductUpdated(product);
+      notifyProductStock(product._id, product.stockQuantity, product.inStock);
+    } catch (socketErr) {
+      console.warn('[Socket.IO] Erreur broadcast toggle stock :', socketErr.message);
+    }
 
     res.status(200).json({
       status: 'success',
-      message: `Statut de stock mis a jour (${product.inStock ? 'En stock' : 'Rupture de stock'}).`,
+      message: `Statut de stock mis à jour (${product.inStock ? 'En stock' : 'Rupture de stock'}).`,
       data: {
         product,
       },

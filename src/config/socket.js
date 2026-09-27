@@ -35,7 +35,6 @@ export const initSocket = (httpServer) => {
     // Rejoindre la salle privée d'administration
     socket.on('admin:join', () => {
       socket.join('admin_room');
-      console.log(`[Socket.IO] Client ${socket.id} a rejoint la salle admin_room`);
     });
 
     // Rejoindre la salle de suivi d'une commande spécifique
@@ -45,7 +44,7 @@ export const initSocket = (httpServer) => {
       }
     });
 
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', () => {
       // Nettoyage automatique des rooms
     });
   });
@@ -84,4 +83,47 @@ export const notifyOrderUpdate = (orderNumber, event, data) => {
     // Notifie également les admins
     io.to('admin_room').emit(event, data);
   }
+};
+
+/**
+ * Émet un événement à l'ensemble des clients connectés (public + admin).
+ * @param {string} event 
+ * @param {any} data 
+ */
+export const broadcastToAll = (event, data) => {
+  if (io) {
+    io.emit(event, data);
+  }
+};
+
+/**
+ * Émet un événement de création de produit vers tous les clients.
+ */
+export const notifyProductCreated = (product) => {
+  broadcastToAll('product:created', product);
+  notifyAdmins('product:created', product);
+};
+
+/**
+ * Émet un événement de modification de produit vers tous les clients.
+ */
+export const notifyProductUpdated = (product) => {
+  broadcastToAll('product:updated', product);
+  notifyAdmins('product:updated', product);
+};
+
+/**
+ * Émet un événement de suppression de produit vers tous les clients.
+ */
+export const notifyProductDeleted = (productId) => {
+  broadcastToAll('product:deleted', { id: productId });
+  notifyAdmins('product:deleted', { id: productId });
+};
+
+/**
+ * Émet un événement de mise à jour de stock produit vers tous les clients.
+ */
+export const notifyProductStock = (productId, stockQuantity, inStock) => {
+  broadcastToAll('product:stock_updated', { id: productId, stockQuantity, inStock });
+  notifyAdmins('product:stock_updated', { id: productId, stockQuantity, inStock });
 };

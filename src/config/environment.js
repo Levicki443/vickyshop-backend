@@ -49,4 +49,12 @@ export const config = {
     senderEmail: (process.env.BREVO_SENDER_EMAIL || process.env.SENDER_EMAIL || 'contact@vickyshop.ci').trim(),
     senderName: (process.env.BREVO_SENDER_NAME || process.env.SENDER_NAME || 'Vicky-Shop Abidjan').trim(),
   },
+
+  cloudinary: {
+    cloudName: (process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_NAME || '').trim(),
+    apiKey: (process.env.CLOUDINARY_API_KEY || '').trim(),
+    apiSecret: (process.env.CLOUDINARY_API_SECRET || '').trim(),
+    url: (process.env.CLOUDINARY_URL || '').trim(),
+    folder: process.env.CLOUDINARY_FOLDER || 'vickyshop/products',
+  },
 };

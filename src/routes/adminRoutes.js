@@ -1,5 +1,6 @@
 import express from 'express';
 import { protect, requireAdmin } from '../middlewares/authMiddleware.js';
+import { uploadSingleImage, uploadMultipleImages } from '../middlewares/uploadMiddleware.js';
 import {
   getDashboardKPIs,
   getAllOrders,
@@ -9,6 +10,8 @@ import {
   updateProduct,
   deleteProduct,
   toggleProductStock,
+  uploadProductImage,
+  uploadMultipleProductImages,
   getAllUsers,
   getShopSettings,
   updateShopSettings,
@@ -26,7 +29,11 @@ router.get('/kpis', getDashboardKPIs);
 router.get('/orders', getAllOrders);
 router.patch('/orders/:id/status', updateOrderStatus);
 
-// 3. Gestion du catalogue produits
+// 3. Téléversement d'images sur Cloudinary
+router.post('/upload', uploadSingleImage, uploadProductImage);
+router.post('/upload-multiple', uploadMultipleImages, uploadMultipleProductImages);
+
+// 4. Gestion du catalogue produits
 router.get('/products', getAllProducts);
 router.post('/products', createProduct);
 router.put('/products/:id', updateProduct);
