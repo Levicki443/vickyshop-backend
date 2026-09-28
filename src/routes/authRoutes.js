@@ -1,5 +1,12 @@
 import { Router } from 'express';
-import { register, registerAdmin, login, getMe } from '../controllers/authController.js';
+import {
+  register,
+  registerAdmin,
+  login,
+  getMe,
+  updateProfile,
+  updatePassword,
+} from '../controllers/authController.js';
 import { protect } from '../middlewares/authMiddleware.js';
 
 const router = Router();
@@ -9,7 +16,9 @@ router.post('/register', register);
 router.post('/register-admin', registerAdmin);
 router.post('/login', login);
 
-// Route privee pour recuperer le profil utilisateur connecte
+// Routes privées du profil utilisateur connecté
 router.get('/me', protect, getMe);
+router.patch('/update-profile', protect, updateProfile);
+router.patch('/update-password', protect, updatePassword);
 
 export default router;

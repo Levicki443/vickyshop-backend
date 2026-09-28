@@ -18,7 +18,6 @@ export const register = async (req, res, next) => {
   try {
     const { name, email, phone, password, address, city } = req.body;
 
-    // Vérification de l'existence de l'email
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({
@@ -27,7 +26,6 @@ export const register = async (req, res, next) => {
       });
     }
 
-    // Création de l'utilisateur
     const newUser = await User.create({
       name,
       email,
@@ -37,13 +35,11 @@ export const register = async (req, res, next) => {
       city: city || 'Abidjan',
     });
 
-    // Génération du token
     const token = generateToken(newUser._id);
 
-    // Reponse securisee (sans renvoyer le mot de passe)
     res.status(201).json({
       status: 'success',
-      message: 'Compte client cree avec succes.',
+      message: 'Compte client créé avec succès.',
       token,
       data: {
         user: {
@@ -63,17 +59,16 @@ export const register = async (req, res, next) => {
 };
 
 /**
- * Inscription securisee d'un Administrateur avec validation de la cle secrete d'administration.
+ * Inscription sécurisée d'un Administrateur avec validation de la clé secrète.
  */
 export const registerAdmin = async (req, res, next) => {
   try {
     const { name, email, phone, password, adminSecretKey } = req.body;
 
-    // 1. Verification de la cle secrete d'administration
     if (!adminSecretKey || adminSecretKey.trim() !== config.admin.secretKey.trim()) {
       return res.status(403).json({
         status: 'error',
-        message: 'Cle secrete d\'administration invalide ou non fournie.',
+        message: 'Clé secrète d\'administration invalide ou non fournie.',
       });
     }
 
@@ -84,16 +79,14 @@ export const registerAdmin = async (req, res, next) => {
       });
     }
 
-    // 2. Verification de l'existence de l'email
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({
         status: 'error',
-        message: 'Un compte avec cette adresse email existe deja.',
+        message: 'Un compte avec cette adresse email existe déjà.',
       });
     }
 
-    // 3. Creation du compte avec role admin verrouille
     const newAdmin = await User.create({
       name,
       email,
@@ -106,7 +99,7 @@ export const registerAdmin = async (req, res, next) => {
 
     res.status(201).json({
       status: 'success',
-      message: 'Compte administrateur cree avec succes.',
+      message: 'Compte administrateur créé avec succès.',
       token,
       data: {
         user: {
@@ -137,7 +130,6 @@ export const login = async (req, res, next) => {
       });
     }
 
-    // Recherche de l'utilisateur avec son mot de passe
     const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({
@@ -193,6 +185,114 @@ export const getMe = async (req, res, next) => {
           address: user.address,
           city: user.city,
           role: user.role,
+          createdAt: user.createdAt,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Met à jour les informations personnelles du client connecté.
+ */
+export const updateProfile = async (req, res, next) => {
+  try {
+    const { name, phone, address, city } = req.body;
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Utilisateur introuvable.',
+      });
+    }
+
+    if (name) user.name = name.trim();
+    if (phone) user.phone = phone.trim();
+    if (address !== undefined) user.address = address.trim();
+    if (city !== undefined) user.city = city.trim();
+
+    await user.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Profil mis à jour avec succès.',
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          address: user.address,
+          city: user.city,
+          role: user.role,
+          createdAt: user.createdAt,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Met à jour le mot de passe de l'utilisateur connecté.
+ */
+export const updatePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Veuillez renseigner votre mot de passe actuel et le nouveau mot de passe.',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Le nouveau mot de passe doit comporter au moins 6 caractères.',
+      });
+    }
+
+    const user = await User.findById(req.user.id).select('+password');
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Utilisateur introuvable.',
+      });
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Le mot de passe actuel est incorrect.',
+      });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Mot de passe mis à jour avec succès.',
+      token,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          address: user.address,
+          city: user.city,
+          role: user.role,
+          createdAt: user.createdAt,
         },
       },
     });
