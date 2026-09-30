@@ -22,14 +22,16 @@ export const validateOrderPayload = (req, res, next) => {
     errors.push('Le nom du client doit comporter au moins 2 caractères.');
   }
 
-  // Validation Numéro de téléphone (Format international ou local)
-  if (!customerPhone || typeof customerPhone !== 'string' || customerPhone.trim().length < 8) {
-    errors.push('Un numéro de téléphone valide est obligatoire (min 8 chiffres).');
+  // Validation Numéro de téléphone (Format international ou local : au moins 10 chiffres)
+  const phoneDigits = typeof customerPhone === 'string' ? customerPhone.replace(/[^\d+]/g, '') : '';
+  const pureDigits = phoneDigits.replace(/\D/g, '');
+  if (!customerPhone || typeof customerPhone !== 'string' || pureDigits.length < 10) {
+    errors.push('Un numéro de téléphone valide est obligatoire (au moins 10 chiffres).');
   }
 
   // Validation Adresse
   if (!deliveryAddress || typeof deliveryAddress !== 'string' || deliveryAddress.trim().length < 3) {
-    errors.push('L\'adresse de livraison est obligatoire (min 3 caractères).');
+    errors.push('L\'adresse de livraison est obligatoire (au moins 3 caractères).');
   }
 
   // Validation Panier
@@ -47,7 +49,7 @@ export const validateOrderPayload = (req, res, next) => {
   }
 
   // Validation Moyen de paiement
-  const validPaymentMethods = ['wave', 'orange-money', 'mtn-momo', 'carte', 'livraison'];
+  const validPaymentMethods = ['wave', 'orange-money', 'orange', 'mtn-momo', 'mtn', 'carte', 'livraison', 'cash'];
   if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
     errors.push(`Moyen de paiement invalide. Choix acceptés : ${validPaymentMethods.join(', ')}.`);
   }

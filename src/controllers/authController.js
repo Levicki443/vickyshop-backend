@@ -26,6 +26,13 @@ export const register = async (req, res, next) => {
       });
     }
 
+    if (!phone || typeof phone !== 'string' || phone.replace(/\D/g, '').length < 10) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Le numéro de téléphone doit comporter au moins 10 chiffres.',
+      });
+    }
+
     const newUser = await User.create({
       name,
       email,
@@ -210,7 +217,16 @@ export const updateProfile = async (req, res, next) => {
     }
 
     if (name) user.name = name.trim();
-    if (phone) user.phone = phone.trim();
+    if (phone !== undefined) {
+      const pureDigits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+      if (pureDigits.length < 10) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Le numéro de téléphone doit comporter au moins 10 chiffres.',
+        });
+      }
+      user.phone = phone.trim();
+    }
     if (address !== undefined) user.address = address.trim();
     if (city !== undefined) user.city = city.trim();
 
