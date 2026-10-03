@@ -3,6 +3,7 @@ import { Order } from '../models/Order.js';
 import { User } from '../models/User.js';
 import { Notification } from '../models/Notification.js';
 import { ROLES, normalizeRole } from '../utils/roleUtils.js';
+import { uploadBufferToCloudinary, isCloudinaryConfigured } from '../services/cloudinaryService.js';
 
 /**
  * Récupère les métriques consolidées du tableau de bord vendeur.
@@ -251,4 +252,49 @@ export const upgradeToSeller = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Téléverse une image de produit pour le vendeur (Cloudinary ou Base64 fallback).
+ */
+export const uploadSellerProductImage = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Aucun fichier image fourni.',
+      });
+    }
+
+    if (isCloudinaryConfigured()) {
+      const result = await uploadBufferToCloudinary(
+        req.file.buffer,
+        `seller_${req.user._id}_${Date.now()}`,
+        'seller_products'
+      );
+      return res.status(200).json({
+        status: 'success',
+        message: 'Image téléversée avec succès sur Cloudinary.',
+        data: {
+          url: result.secure_url || result.url,
+          publicId: result.public_id,
+        },
+      });
+    }
+
+    const mime = req.file.mimetype || 'image/jpeg';
+    const base64Data = `data:${mime};base64,${req.file.buffer.toString('base64')}`;
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Image importée avec succès.',
+      data: {
+        url: base64Data,
+        publicId: null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
