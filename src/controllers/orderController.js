@@ -1,21 +1,24 @@
 import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
 import { Notification } from '../models/Notification.js';
-import { notifyAdmins, notifySeller, notifyProductStock, notifyProductUpdated } from '../config/socket.js';
+import { notifyAdmins, notifySeller, notifyUser, notifyOrderUpdate, notifyProductStock, notifyProductUpdated } from '../config/socket.js';
 import { sendOrderConfirmationEmail } from '../services/emailService.js';
 import { isAdminRole } from '../utils/roleUtils.js';
+
+const STATUS_LABELS = {
+  en_attente: 'En attente', confirmee: 'Confirmée', en_preparation: 'En cours de préparation',
+  expediee: 'Prête / En cours de livraison', livree: 'Livrée avec succès', annulee: 'Annulée',
+};
 
 const generateOrderNumber = () => {
   const now = new Date();
   const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `VK-${dateStr}-${randomSuffix}`;
+  return `VK-${dateStr}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 };
 
 export const createOrder = async (req, res, next) => {
   try {
     const { customerName, customerPhone, customerEmail, deliveryAddress, city, deliveryNotes, items, discount = 0, shippingCost = 0 } = req.body;
-
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ status: 'error', message: 'La commande doit comporter au moins un article.' });
     }
@@ -26,29 +29,18 @@ export const createOrder = async (req, res, next) => {
     const enrichedItems = [];
     let calculatedSubtotal = 0;
 
-    // 1. Vérification préalable et stricte de la disponibilité des stocks (Anti-Race Condition)
     for (const item of items) {
       const product = item.productId ? await Product.findById(item.productId) : await Product.findOne({ title: item.title });
       const quantity = Math.max(1, Number(item.quantity) || 1);
-
-      if (product) {
-        if (product.stockQuantity < quantity) {
-          return res.status(400).json({
-            status: 'error',
-            message: `Stock insuffisant pour "${product.title}". Quantité restante en stock : ${product.stockQuantity}.`,
-          });
-        }
+      if (product && product.stockQuantity < quantity) {
+        return res.status(400).json({ status: 'error', message: `Stock insuffisant pour "${product.title}". Restant : ${product.stockQuantity}.` });
       }
-
       const price = product ? product.price : (Number(item.price) || 0);
-      const sellerId = product && product.seller ? product.seller : null;
-      const sellerName = product && product.sellerName ? product.sellerName : 'Vicky-Shop';
-
       calculatedSubtotal += price * quantity;
       enrichedItems.push({
         productId: product ? product._id : (item.productId || null),
-        sellerId,
-        sellerName,
+        sellerId: product && product.seller ? product.seller : null,
+        sellerName: product && product.sellerName ? product.sellerName : 'Vicky-Shop',
         title: product ? product.title : item.title,
         price,
         quantity,
@@ -83,7 +75,7 @@ export const createOrder = async (req, res, next) => {
       statusHistory: [{ status: 'recue', updatedAt: new Date(), comment: 'Commande passée (Paiement espèces à la livraison).' }],
     });
 
-    // 2. Déduction atomique des stocks
+    // Déduction atomique des stocks
     for (const item of enrichedItems) {
       if (item.productId) {
         try {
@@ -92,7 +84,6 @@ export const createOrder = async (req, res, next) => {
             { $inc: { stockQuantity: -item.quantity } },
             { new: true }
           );
-
           if (updatedProd) {
             if (updatedProd.stockQuantity <= 0) {
               updatedProd.inStock = false;
@@ -109,7 +100,28 @@ export const createOrder = async (req, res, next) => {
 
     try { notifyAdmins('order:new', order); } catch (e) {}
 
-    // Groupement et notifications ciblées en BDD et WebSocket par vendeur
+    // Notification client (Temps Réel & BDD)
+    if (order.customerId) {
+      Notification.create({
+        userId: order.customerId,
+        role: 'client',
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        title: 'Commande validée avec succès 🎉',
+        message: `Votre commande #${order.orderNumber} de ${order.total} FCFA a été transmise aux vendeurs.`,
+        type: 'order_new',
+      }).catch(() => {});
+
+      try {
+        notifyUser(order.customerId, 'order:client:created', {
+          orderNumber: order.orderNumber,
+          total: order.total,
+          status: 'recue',
+        });
+      } catch (e) {}
+    }
+
+    // Groupement et notifications isolées par vendeur
     const sellersMap = {};
     enrichedItems.forEach((item) => {
       if (item.sellerId) {
@@ -125,12 +137,13 @@ export const createOrder = async (req, res, next) => {
 
       Notification.create({
         sellerId: sId,
+        role: 'vendeur',
         orderId: order._id,
         orderNumber: order.orderNumber,
-        title: 'Nouvelle commande reçue',
-        message: `Le client ${order.customerName} a commandé : ${itemsListStr} (Total : ${sellerSubtotal} FCFA).`,
+        title: 'Nouvelle commande reçue 🔔',
+        message: `Le client ${order.customerName} a commandé : ${itemsListStr} (Sous-total : ${sellerSubtotal} FCFA).`,
         type: 'order_new',
-      }).catch((nErr) => console.warn('[Notification] Erreur création :', nErr));
+      }).catch(() => {});
 
       try {
         notifySeller(sId, 'order:seller:new', {
@@ -157,9 +170,7 @@ export const createOrder = async (req, res, next) => {
       message: 'Commande enregistrée avec succès. Paiement prévu en espèces à la livraison.',
       data: { order },
     });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 };
 
 export const getOrderByNumber = async (req, res, next) => {
@@ -227,6 +238,7 @@ export const updateSellerOrderItemStatus = async (req, res, next) => {
 
     const prevStatus = item.status || 'en_attente';
     item.status = status;
+    const statusLabel = STATUS_LABELS[status] || status;
 
     order.statusHistory.push({
       status: `Article "${item.title}" : passage de [${prevStatus}] à [${status}]`,
@@ -235,7 +247,35 @@ export const updateSellerOrderItemStatus = async (req, res, next) => {
     });
     await order.save();
 
-    res.status(200).json({ status: 'success', message: 'Statut de l\'article mis à jour avec succès.', data: { order } });
+    // Notification BDD et WebSocket vers le client
+    if (order.customerId) {
+      Notification.create({
+        userId: order.customerId,
+        role: 'client',
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        title: `Mise à jour : ${item.title}`,
+        message: `Votre article #${order.orderNumber} est désormais : ${statusLabel}.`,
+        type: 'order_status',
+      }).catch(() => {});
+
+      try {
+        notifyUser(order.customerId, 'order:client:update', {
+          orderNumber: order.orderNumber,
+          status,
+          statusLabel,
+          itemTitle: item.title,
+          updatedAt: new Date(),
+        });
+      } catch (e) {}
+    }
+
+    try {
+      notifyOrderUpdate(order.orderNumber, 'order:updated', order);
+      notifyAdmins('order:updated', order);
+    } catch (e) {}
+
+    res.status(200).json({ status: 'success', message: 'Statut mis à jour.', data: { order } });
   } catch (error) { next(error); }
 };
 
@@ -254,6 +294,31 @@ export const confirmOrderPayment = async (req, res, next) => {
     });
     await order.save();
 
-    res.status(200).json({ status: 'success', message: 'Encaissement confirmé avec succès.', data: { order } });
+    if (order.customerId) {
+      Notification.create({
+        userId: order.customerId,
+        role: 'client',
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        title: 'Paiement Validé ✅',
+        message: `L'encaissement en espèces de votre commande #${order.orderNumber} a été validé.`,
+        type: 'order_status',
+      }).catch(() => {});
+
+      try {
+        notifyUser(order.customerId, 'order:client:update', {
+          orderNumber: order.orderNumber,
+          paymentStatus: 'paye',
+          updatedAt: new Date(),
+        });
+      } catch (e) {}
+    }
+
+    try {
+      notifyOrderUpdate(order.orderNumber, 'order:updated', order);
+      notifyAdmins('order:updated', order);
+    } catch (e) {}
+
+    res.status(200).json({ status: 'success', message: 'Encaissement confirmé.', data: { order } });
   } catch (error) { next(error); }
 };

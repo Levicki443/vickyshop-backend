@@ -32,19 +32,26 @@ export const initSocket = (httpServer) => {
   });
 
   io.on('connection', (socket) => {
-    // Rejoindre la salle privée d'administration
+    // 1. Rejoindre la salle privée de l'administrateur
     socket.on('admin:join', () => {
       socket.join('admin_room');
     });
 
-    // Rejoindre la salle privée d'un vendeur spécifique
+    // 2. Rejoindre la salle privée d'un vendeur spécifique
     socket.on('seller:join', (sellerId) => {
       if (sellerId) {
         socket.join(`seller_${sellerId}`);
       }
     });
 
-    // Rejoindre la salle de suivi d'une commande spécifique
+    // 3. Rejoindre la salle privée d'un client spécifique
+    socket.on('user:join', (userId) => {
+      if (userId) {
+        socket.join(`user_${userId}`);
+      }
+    });
+
+    // 4. Rejoindre la salle de suivi d'une commande spécifique (par référence)
     socket.on('order:track', (orderNumber) => {
       if (orderNumber) {
         socket.join(`order:${orderNumber}`);
@@ -52,7 +59,7 @@ export const initSocket = (httpServer) => {
     });
 
     socket.on('disconnect', () => {
-      // Nettoyage automatique des rooms
+      // Nettoyage automatique effectué par Socket.IO
     });
   });
 
@@ -68,6 +75,24 @@ export const getIO = () => {
 };
 
 /**
+ * Émet un événement ciblé vers un utilisateur/client spécifique.
+ */
+export const notifyUser = (userId, event, data) => {
+  if (io && userId) {
+    io.to(`user_${userId}`).emit(event, data);
+  }
+};
+
+/**
+ * Émet un événement ciblé exclusivement vers un vendeur donné (Isolation stricte).
+ */
+export const notifySeller = (sellerId, event, data) => {
+  if (io && sellerId) {
+    io.to(`seller_${sellerId}`).emit(event, data);
+  }
+};
+
+/**
  * Émet un événement à l'ensemble des administrateurs connectés (dashboard).
  */
 export const notifyAdmins = (event, data) => {
@@ -77,19 +102,10 @@ export const notifyAdmins = (event, data) => {
 };
 
 /**
- * Émet un événement ciblé exclusivement vers un vendeur donné (Isolation stricte des notifications).
- */
-export const notifySeller = (sellerId, event, data) => {
-  if (io && sellerId) {
-    io.to(`seller_${sellerId}`).emit(event, data);
-  }
-};
-
-/**
- * Émet un événement de mise à jour pour une commande spécifique.
+ * Émet un événement de mise à jour pour une commande spécifique (suivi en direct).
  */
 export const notifyOrderUpdate = (orderNumber, event, data) => {
-  if (io) {
+  if (io && orderNumber) {
     io.to(`order:${orderNumber}`).emit(event, data);
     io.to('admin_room').emit(event, data);
   }
@@ -105,32 +121,23 @@ export const broadcastToAll = (event, data) => {
 };
 
 /**
- * Émet un événement de création de produit vers tous les clients.
+ * Émetteurs d'événements Produits en temps réel
  */
 export const notifyProductCreated = (product) => {
   broadcastToAll('product:created', product);
   notifyAdmins('product:created', product);
 };
 
-/**
- * Émet un événement de modification de produit vers tous les clients.
- */
 export const notifyProductUpdated = (product) => {
   broadcastToAll('product:updated', product);
   notifyAdmins('product:updated', product);
 };
 
-/**
- * Émet un événement de suppression de produit vers tous les clients.
- */
 export const notifyProductDeleted = (productId) => {
   broadcastToAll('product:deleted', { id: productId });
   notifyAdmins('product:deleted', { id: productId });
 };
 
-/**
- * Émet un événement de mise à jour de stock produit vers tous les clients.
- */
 export const notifyProductStock = (productId, stockQuantity, inStock) => {
   broadcastToAll('product:stock_updated', { id: productId, stockQuantity, inStock });
   notifyAdmins('product:stock_updated', { id: productId, stockQuantity, inStock });
