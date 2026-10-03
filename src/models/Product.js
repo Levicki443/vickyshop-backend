@@ -1,12 +1,23 @@
 import mongoose from 'mongoose';
 
 /**
- * Schéma Mongoose pour les Produits du catalogue Vicky-Shop.
- * Inclut la gestion avancée des stocks, des variantes (couleurs, tailles),
- * de la galerie Cloudinary et des alertes de rupture.
+ * Schéma Mongoose pour les Produits du catalogue Vicky-Shop / Marketplace.
+ * Inclut la liaison au vendeur (seller), marque, référence, sous-catégorie,
+ * statut actif/inactif, variantes et alertes de rupture de stock.
  */
 const productSchema = new mongoose.Schema(
   {
+    seller: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    sellerName: {
+      type: String,
+      trim: true,
+      default: 'Vicky-Shop Officiel',
+    },
     title: {
       type: String,
       required: [true, 'Le titre du produit est obligatoire'],
@@ -34,6 +45,22 @@ const productSchema = new mongoose.Schema(
       required: [true, 'La catégorie est obligatoire'],
       lowercase: true,
       trim: true,
+      index: true,
+    },
+    subCategory: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    brand: {
+      type: String,
+      trim: true,
+      default: 'Générique',
+    },
+    reference: {
+      type: String,
+      trim: true,
+      default: '',
       index: true,
     },
     image: {
@@ -69,6 +96,16 @@ const productSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    isArchived: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     badge: {
       type: String,
       enum: ['Nouveau', 'Promo', 'Vente Flash', 'Populaire', 'Coup de Cœur', null, ''],
@@ -97,12 +134,12 @@ const productSchema = new mongoose.Schema(
   }
 );
 
-// Virtual indiquant si le produit est presque en rupture de stock (<= 5)
+// Virtual indiquant si le produit est presque en rupture de stock
 productSchema.virtual('isLowStock').get(function () {
   return this.stockQuantity > 0 && this.stockQuantity <= (this.lowStockThreshold || 5);
 });
 
-// Virtual calculant le pourcentage de remise si un prix d'origine est renseigné
+// Virtual calculant le pourcentage de remise
 productSchema.virtual('discountPercent').get(function () {
   if (this.originalPrice && this.originalPrice > this.price) {
     return Math.round(((this.originalPrice - this.price) / this.originalPrice) * 100);
@@ -115,12 +152,15 @@ productSchema.pre('save', function (next) {
   if (this.stockQuantity <= 0) {
     this.inStock = false;
     this.stockQuantity = 0;
+  } else {
+    this.inStock = true;
   }
   next();
 });
 
-// Indexation pour optimiser la recherche et le filtrage
-productSchema.index({ category: 1, price: 1, inStock: 1 });
-productSchema.index({ title: 'text', description: 'text' });
+// Indexation optimisée
+productSchema.index({ seller: 1, isArchived: 1, createdAt: -1 });
+productSchema.index({ category: 1, price: 1, inStock: 1, isActive: 1 });
+productSchema.index({ title: 'text', description: 'text', reference: 'text', brand: 'text' });
 
 export const Product = mongoose.model('Product', productSchema);

@@ -1,18 +1,24 @@
-import { Router } from 'express';
+import express from 'express';
 import {
   getProducts,
   getProductById,
+  getMyProducts,
   createProduct,
+  updateProduct,
+  deleteProduct,
 } from '../controllers/productController.js';
-import { sanitizeSearchParams } from '../middlewares/validationMiddleware.js';
+import { protect, requireSeller, checkProductOwnership } from '../middlewares/authMiddleware.js';
 
-const router = Router();
+const router = express.Router();
 
-router.route('/')
-  .get(sanitizeSearchParams, getProducts)
-  .post(createProduct);
+// Routes publiques
+router.get('/', getProducts);
+router.get('/my-products', protect, requireSeller, getMyProducts);
+router.get('/:id', getProductById);
 
-router.route('/:id')
-  .get(getProductById);
+// Routes sécurisées Vendeurs / Admins avec vérification de propriété
+router.post('/', protect, requireSeller, createProduct);
+router.put('/:id', protect, requireSeller, checkProductOwnership, updateProduct);
+router.delete('/:id', protect, requireSeller, checkProductOwnership, deleteProduct);
 
 export default router;

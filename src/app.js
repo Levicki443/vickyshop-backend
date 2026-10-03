@@ -11,6 +11,7 @@ import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import sellerRoutes from './routes/sellerRoutes.js';
 import { ShopSettings } from './models/ShopSettings.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,14 +26,12 @@ app.use(helmet());
 // 2. Configuration CORS sécurisée et dynamique
 const corsOptions = {
   origin: (origin, callback) => {
-    // Autorise les requêtes sans origine (applications mobiles, curl, Postman, Render health-checks)
     if (!origin) {
       return callback(null, true);
     }
 
     const normalizedOrigin = origin.replace(/\/+$/, '');
 
-    // Vérifie si l'origine est dans la liste ALLOW_ORIGINS ou si '*' est présent
     const isAllowed =
       config.cors.allowedOrigins.includes('*') ||
       config.cors.allowedOrigins.includes(origin) ||
@@ -42,13 +41,11 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // Autorise automatiquement toutes les connexions locales & réseau local Wi-Fi (localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x, 172.x.x.x)
     const isLocalOrNetworkIP = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
     if (isLocalOrNetworkIP) {
       return callback(null, true);
     }
 
-    // Fallback permissif si la liste d'origines est vide
     if (config.cors.allowedOrigins.length === 0) {
       return callback(null, true);
     }
@@ -95,7 +92,7 @@ app.use('/image 2 complet d habit', express.static(path.join(rootDir, 'image 2 c
 app.get(['/', '/health', '/api/health'], (req, res) => {
   res.status(200).json({
     status: 'success',
-    message: 'API Vicky-Shop opérationnelle',
+    message: 'API Vicky-Shop Marketplace opérationnelle',
     environment: config.env,
     timestamp: new Date().toISOString(),
   });
@@ -104,9 +101,10 @@ app.get(['/', '/health', '/api/health'], (req, res) => {
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/seller', sellerRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Route publique pour les parametres de la boutique (banniere, code promo, etc.)
+// Route publique pour les paramètres de la boutique
 app.get('/api/settings', async (req, res, next) => {
   try {
     const settings = await ShopSettings.getSettings();
@@ -119,7 +117,7 @@ app.get('/api/settings', async (req, res, next) => {
   }
 });
 
-// 7. Gestion des routes non trouvées (404)
+// 8. Gestion des routes non trouvées (404)
 app.use((req, res, next) => {
   res.status(404).json({
     status: 'error',
@@ -128,7 +126,7 @@ app.use((req, res, next) => {
   });
 });
 
-// 8. Gestionnaire centralisé des erreurs (Standard Production)
+// 9. Gestionnaire centralisé des erreurs (Standard Production)
 app.use((err, req, res, next) => {
   const statusCode = err.statusCode || 500;
   const response = {
@@ -137,7 +135,6 @@ app.use((err, req, res, next) => {
     message: err.message || 'Une erreur interne est survenue sur le serveur.',
   };
 
-  // En développement uniquement, inclure des informations supplémentaires
   if (!config.isProduction && err.stack) {
     response.stack = err.stack;
   }

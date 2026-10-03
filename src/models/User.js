@@ -1,9 +1,11 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { ROLES, ALL_ROLES, normalizeRole } from '../utils/roleUtils.js';
 
 /**
- * Schéma Mongoose pour les Utilisateurs / Clients de Vicky-Shop.
- * Gère l'authentification sécurisée, le hachage des mots de passe et le profil de livraison.
+ * Schéma Mongoose pour les Utilisateurs de Vicky-Shop (Clients, Vendeurs, Administrateurs).
+ * Gère l'authentification sécurisée, le hachage des mots de passe, le profil personnel
+ * et les informations de boutique pour les vendeurs de la marketplace.
  */
 const userSchema = new mongoose.Schema(
   {
@@ -38,8 +40,13 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['customer', 'admin'],
-      default: 'customer',
+      enum: {
+        values: ALL_ROLES,
+        message: 'Le rôle `{VALUE}` n\'est pas autorisé. Choix valides : client, vendeur, admin',
+      },
+      default: ROLES.CLIENT,
+      set: (val) => normalizeRole(val, ROLES.CLIENT),
+      index: true,
     },
     address: {
       type: String,
@@ -50,6 +57,33 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: 'Abidjan',
+    },
+    // Informations spécifiques au Vendeur (Marketplace)
+    shopName: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [120, 'Le nom de la boutique ne peut pas dépasser 120 caractères'],
+    },
+    shopDescription: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [1000, 'La description de la boutique ne peut pas dépasser 1000 caractères'],
+    },
+    shopPhone: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    shopAddress: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    isSellerActive: {
+      type: Boolean,
+      default: true,
     },
   },
   {

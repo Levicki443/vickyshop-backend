@@ -1,13 +1,16 @@
 import { Product } from '../models/Product.js';
+import { Order } from '../models/Order.js';
+import { notifyProductCreated, notifyProductUpdated, notifyProductDeleted } from '../config/socket.js';
+import { isAdminRole, isSellerRole } from '../utils/roleUtils.js';
 
 /**
- * Récupère tous les produits avec filtres optionnels (catégorie, recherche, tri, pagination).
+ * Récupère tous les produits publics avec filtres optionnels.
  */
 export const getProducts = async (req, res, next) => {
   try {
-    const { category, search, sort, page = 1, limit = 20 } = req.query;
+    const { category, search, sort, page = 1, limit = 50 } = req.query;
 
-    const filter = {};
+    const filter = { isArchived: { $ne: true } };
     if (category && category !== 'all') {
       filter.category = category.toLowerCase();
     }
@@ -15,9 +18,8 @@ export const getProducts = async (req, res, next) => {
       filter.title = { $regex: search, $options: 'i' };
     }
 
-    let query = Product.find(filter);
+    let query = Product.find(filter).populate('seller', 'name shopName isSellerActive');
 
-    // Options de tri
     if (sort === 'price-asc') {
       query = query.sort({ price: 1 });
     } else if (sort === 'price-desc') {
@@ -52,7 +54,7 @@ export const getProducts = async (req, res, next) => {
  */
 export const getProductById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id);
+    const product = await Product.findById(req.params.id).populate('seller', 'name shopName shopPhone');
     if (!product) {
       return res.status(404).json({
         status: 'error',
@@ -70,14 +72,153 @@ export const getProductById = async (req, res, next) => {
 };
 
 /**
- * Crée un nouveau produit (réservé aux administrateurs).
+ * Récupère exclusivement les produits appartenant au vendeur connecté (Isolation stricte).
+ */
+export const getMyProducts = async (req, res, next) => {
+  try {
+    const query = isAdminRole(req.user.role) ? { isArchived: { $ne: true } } : { seller: req.user._id, isArchived: { $ne: true } };
+    const products = await Product.find(query).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      status: 'success',
+      results: products.length,
+      data: { products },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Crée un nouveau produit (associé au vendeur connecté ou admin).
  */
 export const createProduct = async (req, res, next) => {
   try {
-    const newProduct = await Product.create(req.body);
+    const productData = {
+      ...req.body,
+      seller: req.user._id,
+      sellerName: isSellerRole(req.user.role) ? (req.user.shopName || req.user.name) : 'Vicky-Shop Officiel',
+    };
+
+    const newProduct = await Product.create(productData);
+
+    try {
+      notifyProductCreated(newProduct);
+    } catch (sErr) {
+      console.warn('[Socket.IO] Erreur notification création produit :', sErr.message);
+    }
+
     res.status(201).json({
       status: 'success',
+      message: 'Produit créé avec succès.',
       data: { product: newProduct },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Modifie un produit existant (protégé par checkProductOwnership).
+ */
+export const updateProduct = async (req, res, next) => {
+  try {
+    const allowedFields = [
+      'title',
+      'description',
+      'price',
+      'originalPrice',
+      'category',
+      'subCategory',
+      'brand',
+      'reference',
+      'image',
+      'images',
+      'colors',
+      'sizes',
+      'stockQuantity',
+      'lowStockThreshold',
+      'badge',
+      'featured',
+      'isActive',
+    ];
+
+    const updates = {};
+    for (const key of allowedFields) {
+      if (req.body[key] !== undefined) {
+        updates[key] = req.body[key];
+      }
+    }
+
+    // Mise à jour de la disponibilité du stock automatique
+    if (updates.stockQuantity !== undefined) {
+      updates.inStock = Number(updates.stockQuantity) > 0;
+    }
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
+
+    try {
+      notifyProductUpdated(updatedProduct);
+    } catch (sErr) {
+      console.warn('[Socket.IO] Erreur notification mise à jour produit :', sErr.message);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Produit mis à jour avec succès.',
+      data: { product: updatedProduct },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Supprime ou archive intelligemment un produit (protégé par checkProductOwnership).
+ * Si le produit a un historique de commandes, il est archivé afin de préserver l'intégrité comptable.
+ */
+export const deleteProduct = async (req, res, next) => {
+  try {
+    const productId = req.params.id;
+
+    // Vérifie si le produit possède des commandes enregistrées
+    const hasOrderHistory = await Order.exists({ 'items.productId': productId });
+
+    if (hasOrderHistory) {
+      const archived = await Product.findByIdAndUpdate(
+        productId,
+        { $set: { isArchived: true, isActive: false, inStock: false } },
+        { new: true }
+      );
+
+      try {
+        notifyProductDeleted(productId);
+      } catch (sErr) {}
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Ce produit étant lié à des commandes passées, il a été archivé et retiré de la vente pour préserver l\'historique.',
+        data: { product: archived, isArchived: true },
+      });
+    }
+
+    // Si aucune commande n'existe pour cet article, suppression définitive
+    await Product.findByIdAndDelete(productId);
+
+    try {
+      notifyProductDeleted(productId);
+    } catch (sErr) {
+      console.warn('[Socket.IO] Erreur notification suppression produit :', sErr.message);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Produit supprimé définitivement de votre boutique.',
+      data: { deleted: true },
     });
   } catch (error) {
     next(error);

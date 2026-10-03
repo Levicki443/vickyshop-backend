@@ -6,6 +6,7 @@ import {
   getMe,
   updateProfile,
   updatePassword,
+  upgradeUserToSeller,
 } from '../controllers/authController.js';
 import { protect } from '../middlewares/authMiddleware.js';
 
@@ -19,6 +20,7 @@ router.post('/login', login);
 // Routes privées du profil utilisateur connecté
 router.get('/me', protect, getMe);
 router.patch('/update-profile', protect, updateProfile);
+router.post('/upgrade-seller', protect, upgradeUserToSeller);
 router.patch('/update-password', protect, updatePassword);
 
 export default router;

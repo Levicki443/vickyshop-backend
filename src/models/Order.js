@@ -1,13 +1,25 @@
 import mongoose from 'mongoose';
 
 /**
- * Schéma Mongoose pour les Articles d'une Commande.
+ * Schéma Mongoose pour les Articles d'une Commande (OrderItem).
+ * Conserve la référence vers le vendeur pour la ventilation et l'isolation Marketplace.
  */
 const orderItemSchema = new mongoose.Schema(
   {
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
+      default: null,
+    },
+    sellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    sellerName: {
+      type: String,
+      default: 'Vicky-Shop',
     },
     title: {
       type: String,
@@ -36,15 +48,27 @@ const orderItemSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    status: {
+      type: String,
+      enum: ['en_attente', 'confirmee', 'en_preparation', 'expediee', 'livree', 'annulee'],
+      default: 'en_attente',
+    },
   },
-  { _id: false }
+  { _id: true }
 );
 
 /**
- * Schéma Mongoose pour les Commandes (Orders) de Vicky-Shop.
+ * Schéma Mongoose pour les Commandes (Orders) de Vicky-Shop Marketplace.
+ * Paiement exclusivement en espèces à la livraison (Cash on Delivery).
  */
 const orderSchema = new mongoose.Schema(
   {
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
     orderNumber: {
       type: String,
       required: true,
@@ -87,7 +111,7 @@ const orderSchema = new mongoose.Schema(
     items: {
       type: [orderItemSchema],
       required: [true, 'La commande doit contenir au moins un article'],
-      validate: [(val) => val.length > 0, 'Le panier ne peut pas être vide'],
+      validate: [(val) => val && val.length > 0, 'Le panier ne peut pas être vide'],
     },
     subtotal: {
       type: Number,
@@ -109,22 +133,41 @@ const orderSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    amountToCollect: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
     paymentMethod: {
       type: String,
       required: [true, 'Le moyen de paiement est requis'],
-      enum: ['wave', 'orange-money', 'orange', 'mtn-momo', 'mtn', 'carte', 'livraison', 'cash'],
+      enum: ['livraison', 'CASH_ON_DELIVERY', 'cash'],
       default: 'livraison',
     },
     paymentStatus: {
       type: String,
-      enum: ['en_attente', 'paye', 'echoue', 'rembourse'],
+      enum: ['en_attente', 'paye', 'non_encaisse', 'refuse', 'rembourse'],
       default: 'en_attente',
+      index: true,
     },
     orderStatus: {
       type: String,
-      enum: ['recue', 'en_preparation', 'en_livraison', 'livree', 'annulee'],
+      enum: ['recue', 'confirmee', 'en_preparation', 'en_livraison', 'livree', 'annulee', 'echec_livraison', 'refusee'],
       default: 'recue',
       index: true,
+    },
+    paymentConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+    deliveredAt: {
+      type: Date,
+      default: null,
     },
     statusHistory: [
       {

@@ -37,6 +37,13 @@ export const initSocket = (httpServer) => {
       socket.join('admin_room');
     });
 
+    // Rejoindre la salle privée d'un vendeur spécifique
+    socket.on('seller:join', (sellerId) => {
+      if (sellerId) {
+        socket.join(`seller_${sellerId}`);
+      }
+    });
+
     // Rejoindre la salle de suivi d'une commande spécifique
     socket.on('order:track', (orderNumber) => {
       if (orderNumber) {
@@ -62,8 +69,6 @@ export const getIO = () => {
 
 /**
  * Émet un événement à l'ensemble des administrateurs connectés (dashboard).
- * @param {string} event 
- * @param {any} data 
  */
 export const notifyAdmins = (event, data) => {
   if (io) {
@@ -72,23 +77,26 @@ export const notifyAdmins = (event, data) => {
 };
 
 /**
+ * Émet un événement ciblé exclusivement vers un vendeur donné (Isolation stricte des notifications).
+ */
+export const notifySeller = (sellerId, event, data) => {
+  if (io && sellerId) {
+    io.to(`seller_${sellerId}`).emit(event, data);
+  }
+};
+
+/**
  * Émet un événement de mise à jour pour une commande spécifique.
- * @param {string} orderNumber 
- * @param {string} event 
- * @param {any} data 
  */
 export const notifyOrderUpdate = (orderNumber, event, data) => {
   if (io) {
     io.to(`order:${orderNumber}`).emit(event, data);
-    // Notifie également les admins
     io.to('admin_room').emit(event, data);
   }
 };
 
 /**
- * Émet un événement à l'ensemble des clients connectés (public + admin).
- * @param {string} event 
- * @param {any} data 
+ * Émet un événement à l'ensemble des clients connectés.
  */
 export const broadcastToAll = (event, data) => {
   if (io) {

@@ -3,6 +3,8 @@ import app from './app.js';
 import { config } from './config/environment.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { initSocket } from './config/socket.js';
+import { User } from './models/User.js';
+import { migrateLegacyRoles } from './utils/roleUtils.js';
 
 /**
  * Initialisation du serveur HTTP, de Socket.IO et de la base de données.
@@ -10,6 +12,9 @@ import { initSocket } from './config/socket.js';
 const startServer = async () => {
   // Connexion à la base de données
   await connectDatabase();
+
+  // Migration / Normalisation automatique des rôles existants en base
+  await migrateLegacyRoles(User);
 
   // Création du serveur HTTP natif avec Express
   const httpServer = http.createServer(app);
