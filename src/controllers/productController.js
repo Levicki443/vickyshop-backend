@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Product } from '../models/Product.js';
 import { Order } from '../models/Order.js';
 import { notifyProductCreated, notifyProductUpdated, notifyProductDeleted } from '../config/socket.js';
@@ -50,15 +51,24 @@ export const getProducts = async (req, res, next) => {
 };
 
 /**
- * Récupère un produit spécifique par son identifiant.
+ * Récupère un produit spécifique par son identifiant avec validation stricte.
  */
 export const getProductById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id).populate('seller', 'name shopName shopPhone');
-    if (!product) {
+    const { id } = req.params;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(404).json({
         status: 'error',
-        message: 'Produit introuvable.',
+        message: 'Identifiant de produit invalide ou inexistant.',
+      });
+    }
+
+    const product = await Product.findById(id).populate('seller', 'name shopName shopPhone');
+    if (!product || product.isArchived) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Produit introuvable ou retiré de la vente.',
       });
     }
 
