@@ -2,6 +2,7 @@ import { User } from '../models/User.js';
 import { Order } from '../models/Order.js';
 import { ShopSettings } from '../models/ShopSettings.js';
 import { securityLog } from '../utils/securityLogger.js';
+import { notifySettingsUpdated } from '../config/socket.js';
 
 export const getAllUsers = async (req, res, next) => {
   try {
@@ -77,7 +78,7 @@ export const updateShopSettings = async (req, res, next) => {
   try {
     const allowedFields = [
       'shopName', 'currency', 'freeShippingThreshold', 'defaultShippingCost',
-      'announcementText', 'activePromoCode', 'promoDiscountPercent',
+      'announcementText', 'isAnnouncementActive', 'activePromoCode', 'promoDiscountPercent',
       'whatsappNumber', 'isShopOpen', 'contactEmail',
     ];
 
@@ -94,6 +95,12 @@ export const updateShopSettings = async (req, res, next) => {
     } else {
       Object.assign(settings, updates);
       await settings.save();
+    }
+
+    try {
+      notifySettingsUpdated(settings);
+    } catch (socketErr) {
+      console.warn('[Socket.IO] Erreur diffusion mise à jour paramètres :', socketErr.message);
     }
 
     securityLog.adminAction({

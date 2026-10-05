@@ -189,3 +189,8 @@ export const notifyProductStock = (productId, stockQuantity, inStock) => {
   broadcastToAll('product:stock_updated', { id: productId, stockQuantity, inStock });
   notifyAdmins('product:stock_updated', { id: productId, stockQuantity, inStock });
 };
+
+export const notifySettingsUpdated = (settings) => {
+  broadcastToAll('settings:updated', settings);
+  notifyAdmins('settings:updated', settings);
+};

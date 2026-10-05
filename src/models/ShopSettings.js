@@ -28,8 +28,12 @@ const shopSettingsSchema = new mongoose.Schema(
     },
     announcementText: {
       type: String,
-      default: 'VENTE FLASH : Jusqu\'a -50% | LIVRAISON EXPRESS : 24/48h en Cote d\'Ivoire | PAIEMENT SECURISE : Wave, Orange Money, MTN MoMo | CODE PROMO : VICKY10 (-10%)',
+      default: 'VENTE FLASH : Jusqu\'à -50% | LIVRAISON EXPRESS : 24/48h partout en Côte d\'Ivoire | PAIEMENT SÉCURISÉ : Espèces à la livraison, Wave, Orange Money, MTN MoMo | CODE PROMO : VICKY10 (-10%)',
       trim: true,
+    },
+    isAnnouncementActive: {
+      type: Boolean,
+      default: true,
     },
     activePromoCode: {
       type: String,
