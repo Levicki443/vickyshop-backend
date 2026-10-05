@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { ROLES, ALL_ROLES, normalizeRole } from '../utils/roleUtils.js';
+import { generateRandomToken, hashToken } from '../utils/cryptoUtils.js';
 
 /**
  * Schéma Mongoose pour les Utilisateurs de Vicky-Shop (Clients, Vendeurs, Administrateurs).
- * Gère l'authentification sécurisée, le hachage des mots de passe, le profil personnel
- * et les informations de boutique pour les vendeurs de la marketplace.
+ * Inclut la gestion du verrouillage temporaire de compte, de la réinitialisation de mot de passe
+ * et du contrôle d'accès basé sur les rôles (RBAC).
  */
 const userSchema = new mongoose.Schema(
   {
@@ -35,7 +36,7 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Le mot de passe est obligatoire'],
-      minlength: [6, 'Le mot de passe doit comporter au moins 6 caractères'],
+      minlength: [8, 'Le mot de passe doit comporter au moins 8 caractères'],
       select: false, // Empêche l'exposition accidentelle du mot de passe dans les requêtes
     },
     role: {
@@ -52,11 +53,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+      maxlength: [255, 'L\'adresse ne peut pas dépasser 255 caractères'],
     },
     city: {
       type: String,
       trim: true,
       default: 'Abidjan',
+      maxlength: [100, 'La ville ne peut pas dépasser 100 caractères'],
     },
     // Informations spécifiques au Vendeur (Marketplace)
     shopName: {
@@ -85,6 +88,43 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Sécurité : Tentatives infructueuses et verrouillage temporaire (Anti-Bruteforce)
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
+    lockUntil: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    // Sécurité : Réinitialisation de mot de passe par jeton temporaire haché
+    passwordResetToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    passwordResetExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+    // Sécurité : 2FA (Authentification à deux facteurs pour admin/vendeur)
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    twoFactorCode: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    twoFactorExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   {
     timestamps: true,
@@ -105,6 +145,19 @@ userSchema.pre('save', async function (next) {
 // Méthode personnalisée pour comparer le mot de passe lors de la connexion
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// Vérifie si le compte est actuellement verrouillé à cause d'échecs répétés
+userSchema.methods.isLocked = function () {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
+};
+
+// Génère un jeton temporaire cryptographique pour la réinitialisation de mot de passe
+userSchema.methods.createPasswordResetToken = function () {
+  const resetToken = generateRandomToken(32);
+  this.passwordResetToken = hashToken(resetToken);
+  this.passwordResetExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+  return resetToken;
 };
 
 export const User = mongoose.model('User', userSchema);

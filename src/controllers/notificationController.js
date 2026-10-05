@@ -1,7 +1,7 @@
 import { Notification } from '../models/Notification.js';
 
 /**
- * Récupère les notifications du client connecté.
+ * Récupère les notifications du client connecté (Isolation stricte).
  */
 export const getClientNotifications = async (req, res, next) => {
   try {
@@ -25,7 +25,7 @@ export const getClientNotifications = async (req, res, next) => {
 };
 
 /**
- * Marque une notification client comme lue.
+ * Marque une notification client comme lue avec vérification stricte de propriété (Anti-IDOR).
  */
 export const markClientNotificationRead = async (req, res, next) => {
   try {
@@ -38,7 +38,7 @@ export const markClientNotificationRead = async (req, res, next) => {
     if (!notification) {
       return res.status(404).json({
         status: 'error',
-        message: 'Notification introuvable.',
+        message: 'Notification introuvable ou vous n\'en êtes pas le destinataire.',
       });
     }
 

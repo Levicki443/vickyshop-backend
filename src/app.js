@@ -2,11 +2,11 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
-import { config } from './config/environment.js';
-
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { config } from './config/environment.js';
+import { sanitizeNoSql } from './middlewares/noSqlSanitizeMiddleware.js';
+
 import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import authRoutes from './routes/authRoutes.js';
@@ -21,10 +21,29 @@ const rootDir = path.resolve(__dirname, '../../');
 
 const app = express();
 
-// 1. Sécurité des en-têtes HTTP
-app.use(helmet());
+// 1. Sécurité des en-têtes HTTP avec Helmet (Durcissement Production & CSP)
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://cdnjs.cloudflare.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com'],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com', 'https://images.unsplash.com'],
+        connectSrc: ["'self'", 'ws:', 'wss:', 'http://localhost:5000', 'https://*.cloudinary.com'],
+        frameAncestors: ["'none'"], // Protection anti-Clickjacking
+      },
+    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    frameguard: { action: 'deny' },
+    noSniff: true,
+    xssFilter: true,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  })
+);
 
-// 2. Configuration CORS sécurisée et dynamique
+// 2. Configuration CORS stricte et dynamique
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) {
@@ -51,7 +70,6 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    console.warn(`[CORS] Origine bloquée : "${origin}". Origines autorisées :`, config.cors.allowedOrigins);
     return callback(null, false);
   },
   credentials: true,
@@ -62,24 +80,14 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-// 3. Limitation du débit (Rate Limiting)
-const limiter = rateLimit({
-  windowMs: config.rateLimit.windowMs,
-  max: config.rateLimit.maxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    status: 429,
-    message: 'Trop de requêtes effectuées depuis cette adresse IP, veuillez réessayer plus tard.',
-  },
-});
-app.use('/api', limiter);
+// 3. Analyseurs de corps de requête avec limites strictes (Anti-DoS)
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// 4. Analyseurs de corps de requête (avec limite de taille stricte)
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+// 4. Protection Globale Anti-Injection NoSQL (Suppression des clés $ et .)
+app.use(sanitizeNoSql);
 
-// 5. Journalisation des requêtes
+// 5. Journalisation des requêtes en développement
 if (!config.isProduction) {
   app.use(morgan('dev'));
 }
@@ -89,11 +97,11 @@ app.use('/photo', express.static(path.join(rootDir, 'photo')));
 app.use('/image 1 pulle & chapeau', express.static(path.join(rootDir, 'image 1 pulle & chapeau')));
 app.use('/image 2 complet d habit', express.static(path.join(rootDir, 'image 2 complet d habit')));
 
-// 7. Montage des routes de l'API & Healthcheck
+// 7. Point de santé & Routes de l'API
 app.get(['/', '/health', '/api/health'], (req, res) => {
   res.status(200).json({
     status: 'success',
-    message: 'API Vicky-Shop Marketplace opérationnelle',
+    message: 'API Vicky-Shop Marketplace opérationnelle et hautement sécurisée',
     environment: config.env,
     timestamp: new Date().toISOString(),
   });
@@ -120,17 +128,17 @@ app.get('/api/settings', async (req, res, next) => {
 });
 
 // 8. Gestion des routes non trouvées (404)
-app.use((req, res, next) => {
+app.use((req, res) => {
   res.status(404).json({
     status: 'error',
     code: 404,
-    message: `La ressource demandée (${req.originalUrl}) est introuvable sur ce serveur.`,
+    message: `La ressource demandée (${req.originalUrl}) est introuvable.`,
   });
 });
 
-// 9. Gestionnaire centralisé des erreurs (Standard Production)
+// 9. Gestionnaire centralisé des erreurs (Zero Data Leakage en Production)
 app.use((err, req, res, next) => {
-  const statusCode = err.statusCode || 500;
+  const statusCode = err.statusCode || (err.name === 'ValidationError' ? 400 : 500);
   const response = {
     status: 'error',
     code: statusCode,

@@ -1,10 +1,9 @@
 import express from 'express';
 import { protect, requireAdmin } from '../middlewares/authMiddleware.js';
 import { uploadSingleImage, uploadMultipleImages } from '../middlewares/uploadMiddleware.js';
+import { getDashboardKPIs } from '../controllers/adminKPIController.js';
+import { getAllOrders, updateOrderStatus } from '../controllers/adminOrderController.js';
 import {
-  getDashboardKPIs,
-  getAllOrders,
-  updateOrderStatus,
   getAllProducts,
   createProduct,
   updateProduct,
@@ -12,14 +11,16 @@ import {
   toggleProductStock,
   uploadProductImage,
   uploadMultipleProductImages,
+} from '../controllers/adminProductController.js';
+import {
   getAllUsers,
   getShopSettings,
   updateShopSettings,
-} from '../controllers/adminController.js';
+} from '../controllers/adminSettingsController.js';
 
 const router = express.Router();
 
-// Toutes les routes sous ce routeur sont strictement reservees au role admin
+// Toutes les routes d'administration sont strictement protégées par JWT et rôle Admin
 router.use(protect, requireAdmin);
 
 // 1. Indicateurs de performance & finances
@@ -40,10 +41,10 @@ router.put('/products/:id', updateProduct);
 router.delete('/products/:id', deleteProduct);
 router.patch('/products/:id/toggle-stock', toggleProductStock);
 
-// 4. Gestion des utilisateurs / clients
+// 5. Gestion des utilisateurs / clients
 router.get('/users', getAllUsers);
 
-// 5. Parametres generaux de la boutique
+// 6. Paramètres généraux de la boutique
 router.get('/settings', getShopSettings);
 router.put('/settings', updateShopSettings);
 

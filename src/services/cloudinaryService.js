@@ -1,5 +1,6 @@
 import cloudinary from '../config/cloudinary.js';
 import { config } from '../config/environment.js';
+import crypto from 'crypto';
 
 /**
  * Vérifie si Cloudinary est correctement configuré via les variables d'environnement.
@@ -12,20 +13,22 @@ export const isCloudinaryConfigured = () => {
 };
 
 /**
- * Téléverse un tampon de fichier (Buffer Multer) directement vers Cloudinary avec compression WebP automatique.
+ * Téléverse un tampon de fichier directement vers Cloudinary avec nom aléatoire cryptographique.
  * @param {Buffer} buffer 
- * @param {string} filename 
+ * @param {string} originalName 
  * @param {string} subfolder 
  * @returns {Promise<{ url: string, secure_url: string, public_id: string, width: number, height: number, format: string }>}
  */
-export const uploadBufferToCloudinary = (buffer, filename = 'product_image', subfolder = '') => {
+export const uploadBufferToCloudinary = (buffer, originalName = 'image', subfolder = '') => {
   return new Promise((resolve, reject) => {
     if (!isCloudinaryConfigured()) {
       return reject(
-        new Error('Cloudinary non configuré. Veuillez renseigner CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY et CLOUDINARY_API_SECRET dans le fichier .env.')
+        new Error('Cloudinary non configuré. Veuillez renseigner CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY et CLOUDINARY_API_SECRET.')
       );
     }
 
+    const randomSuffix = crypto.randomBytes(12).toString('hex');
+    const publicId = `img_${Date.now()}_${randomSuffix}`;
     const folderPath = subfolder
       ? `${config.cloudinary.folder}/${subfolder}`.replace(/\/+/g, '/')
       : config.cloudinary.folder;
@@ -33,6 +36,7 @@ export const uploadBufferToCloudinary = (buffer, filename = 'product_image', sub
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: folderPath,
+        public_id: publicId,
         resource_type: 'image',
         transformation: [
           { width: 1200, height: 1200, crop: 'limit' },
@@ -42,7 +46,7 @@ export const uploadBufferToCloudinary = (buffer, filename = 'product_image', sub
       },
       (error, result) => {
         if (error) {
-          console.error('[Cloudinary] Erreur upload stream :', error);
+          console.error('[Cloudinary] Erreur upload stream :', error.message);
           return reject(error);
         }
         resolve({
@@ -68,7 +72,6 @@ export const deleteFromCloudinary = async (publicId) => {
   if (!isCloudinaryConfigured() || !publicId) return null;
   try {
     const result = await cloudinary.uploader.destroy(publicId);
-    console.log(`[Cloudinary] Image ${publicId} supprimée :`, result);
     return result;
   } catch (err) {
     console.warn(`[Cloudinary] Impossible de supprimer ${publicId} :`, err.message);

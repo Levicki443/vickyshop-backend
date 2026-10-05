@@ -3,15 +3,26 @@ import dotenv from 'dotenv';
 // Chargement des variables d'environnement
 dotenv.config();
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Validation des secrets critiques en environnement de production
+if (isProduction) {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+    console.error('CRITIQUE SÉCURITÉ : La variable JWT_SECRET doit comporter au moins 32 caractères en production.');
+  }
+  if (!process.env.ADMIN_SECRET_KEY && !process.env.ADMIN_SECRET && !process.env.AD_PW) {
+    console.warn('AVERTISSEMENT SÉCURITÉ : Aucune clé secrète d\'administration personnalisée n\'est configurée.');
+  }
+}
+
 /**
- * Configuration centralisée et sécurisée de l'application.
- * Vérifie la présence des variables critiques et fournit des valeurs saines par défaut.
+ * Configuration centralisée et durcie de l'application Vicky-Shop.
  */
 export const config = {
   env: process.env.NODE_ENV || 'development',
-  isProduction: process.env.NODE_ENV === 'production',
+  isProduction,
   port: parseInt(process.env.PORT || '5000', 10),
-  
+
   cors: {
     allowedOrigins: (process.env.ALLOW_ORIGINS || process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN)
       ? (process.env.ALLOW_ORIGINS || process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN)
@@ -36,12 +47,18 @@ export const config = {
   },
 
   admin: {
-    secretKey: (process.env.AD_PW || process.env.ADMIN_REGISTRATION_SECRET || process.env.ADMIN_SECRET_KEY || process.env.ADMIN_SECRET || 'vicky_admin_secret_key_2026_abidjan_master').trim(),
+    secretKey: (
+      process.env.AD_PW ||
+      process.env.ADMIN_REGISTRATION_SECRET ||
+      process.env.ADMIN_SECRET_KEY ||
+      process.env.ADMIN_SECRET ||
+      (isProduction ? '' : 'vicky_admin_secret_key_2026_abidjan_master')
+    ).trim(),
   },
 
   rateLimit: {
     windowMs: 15 * 60 * 1000, // 15 minutes
-    maxRequests: process.env.NODE_ENV === 'production' ? 100 : 1000, // Requetes max par fenetre
+    maxRequests: isProduction ? 200 : 2000,
   },
 
   brevo: {

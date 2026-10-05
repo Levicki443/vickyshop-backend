@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/seeders/seedProducts.js",
-    "test": "echo \"Aucun test configuré pour l'instant\" && exit 0"
+    "test:security": "node src/tests/securityCheck.js",
+    "test": "node src/tests/securityCheck.js"
   },
   "keywords": [
     "ecommerce",

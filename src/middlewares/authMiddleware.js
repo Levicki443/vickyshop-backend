@@ -3,6 +3,7 @@ import { config } from '../config/environment.js';
 import { User } from '../models/User.js';
 import { Product } from '../models/Product.js';
 import { ROLES, normalizeRole, isSellerRole, isAdminRole } from '../utils/roleUtils.js';
+import { securityLog } from '../utils/securityLogger.js';
 
 /**
  * Middleware de protection des routes nécessitant une authentification JWT.
@@ -11,8 +12,8 @@ import { ROLES, normalizeRole, isSellerRole, isAdminRole } from '../utils/roleUt
 export const protect = async (req, res, next) => {
   try {
     let token;
+    const clientIp = req.ip || req.connection.remoteAddress;
 
-    // Récupération du jeton dans l'en-tête Authorization
     if (
       req.headers.authorization &&
       req.headers.authorization.startsWith('Bearer')
@@ -27,19 +28,35 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    // Vérification de la validité cryptographique du jeton
+    // Vérification cryptographique du jeton
     const decoded = jwt.verify(token, config.jwt.secret);
 
-    // Vérification de l'existence de l'utilisateur en base de données
-    const currentUser = await User.findById(decoded.id);
+    // Récupération de l'utilisateur avec vérification d'état
+    const currentUser = await User.findById(decoded.id).select('+lockUntil');
     if (!currentUser) {
+      securityLog.accessDenied({
+        userId: decoded.id,
+        role: 'Inconnu',
+        route: req.originalUrl,
+        method: req.method,
+        ip: clientIp,
+        reason: 'Utilisateur associé au jeton supprimé',
+      });
       return res.status(401).json({
         status: 'error',
         message: 'L\'utilisateur associé à ce jeton n\'existe plus.',
       });
     }
 
-    // Si c'est un compte vendeur désactivé ou suspendu, refuser l'accès
+    // Si le compte est temporairement verrouillé
+    if (currentUser.isLocked && currentUser.isLocked()) {
+      return res.status(423).json({
+        status: 'error',
+        message: 'Votre compte est temporairement verrouillé pour des raisons de sécurité.',
+      });
+    }
+
+    // Si c'est un compte vendeur suspendu
     if (isSellerRole(currentUser.role) && currentUser.isSellerActive === false) {
       return res.status(403).json({
         status: 'error',
@@ -47,7 +64,6 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    // Transmission de l'utilisateur authentifié garanti à la requête
     req.user = currentUser;
     next();
   } catch (error) {
@@ -60,7 +76,6 @@ export const protect = async (req, res, next) => {
 
 /**
  * Middleware générique pour restreindre l'accès à une liste de rôles autorisés.
- * Gère la normalisation robuste des rôles passés et du rôle utilisateur.
  */
 export const requireRole = (...roles) => {
   const allowed = roles.map((r) => normalizeRole(r));
@@ -74,6 +89,14 @@ export const requireRole = (...roles) => {
 
     const currentRole = normalizeRole(req.user.role);
     if (!allowed.includes(currentRole)) {
+      securityLog.accessDenied({
+        userId: req.user._id,
+        role: currentRole,
+        route: req.originalUrl,
+        method: req.method,
+        ip: req.ip,
+        reason: `Rôle requis : [${allowed.join(', ')}] mais utilisateur a [${currentRole}]`,
+      });
       return res.status(403).json({
         status: 'error',
         message: 'Accès refusé. Vous ne disposez pas des autorisations nécessaires.',
@@ -88,6 +111,14 @@ export const requireRole = (...roles) => {
  */
 export const requireSeller = (req, res, next) => {
   if (!req.user || (!isSellerRole(req.user.role) && !isAdminRole(req.user.role))) {
+    securityLog.accessDenied({
+      userId: req.user?._id,
+      role: req.user?.role,
+      route: req.originalUrl,
+      method: req.method,
+      ip: req.ip,
+      reason: 'Espace réservé aux vendeurs',
+    });
     return res.status(403).json({
       status: 'error',
       message: 'Accès refusé. Cet espace est exclusivement réservé aux vendeurs enregistrés.',
@@ -101,6 +132,14 @@ export const requireSeller = (req, res, next) => {
  */
 export const requireAdmin = (req, res, next) => {
   if (!req.user || !isAdminRole(req.user.role)) {
+    securityLog.accessDenied({
+      userId: req.user?._id,
+      role: req.user?.role,
+      route: req.originalUrl,
+      method: req.method,
+      ip: req.ip,
+      reason: 'Privilèges administrateur requis',
+    });
     return res.status(403).json({
       status: 'error',
       message: 'Accès refusé. Vous devez disposer des privilèges administrateur pour cette ressource.',
@@ -111,7 +150,7 @@ export const requireAdmin = (req, res, next) => {
 
 /**
  * Middleware vérifiant que le produit manipulé appartient bien au vendeur connecté (ou qu'il est admin).
- * Garantit l'isolation stricte multi-vendeur et prévient les failles de type IDOR.
+ * Prévient formellement les vulnérabilités de type IDOR / BOLA.
  */
 export const checkProductOwnership = async (req, res, next) => {
   try {
@@ -136,6 +175,14 @@ export const checkProductOwnership = async (req, res, next) => {
       !product.seller ||
       product.seller.toString() !== req.user._id.toString()
     ) {
+      securityLog.accessDenied({
+        userId: req.user._id,
+        role: req.user.role,
+        route: req.originalUrl,
+        method: req.method,
+        ip: req.ip,
+        reason: `IDOR intercepté : tentative de modification du produit ${id} d'un autre vendeur`,
+      });
       return res.status(403).json({
         status: 'error',
         message: 'Action interdite. Vous n\'êtes pas le propriétaire de ce produit.',
