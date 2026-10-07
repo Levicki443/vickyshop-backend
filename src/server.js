@@ -5,6 +5,7 @@ import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { initSocket } from './config/socket.js';
 import { User } from './models/User.js';
 import { migrateLegacyRoles } from './utils/roleUtils.js';
+import { seedReviews } from './seeders/reviewSeeder.js';
 
 /**
  * Initialisation du serveur HTTP, de Socket.IO et de la base de données.
@@ -15,6 +16,9 @@ const startServer = async () => {
 
   // Migration / Normalisation automatique des rôles existants en base
   await migrateLegacyRoles(User);
+
+  // Initialisation automatique des témoignages s'ils n'existent pas encore
+  await seedReviews();
 
   // Création du serveur HTTP natif avec Express
   const httpServer = http.createServer(app);

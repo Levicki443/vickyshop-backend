@@ -49,7 +49,7 @@ const shopSettingsSchema = new mongoose.Schema(
     },
     whatsappNumber: {
       type: String,
-      default: '2250700000000',
+      default: '2250554726574',
       trim: true,
     },
     isShopOpen: {
