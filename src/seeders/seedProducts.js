@@ -204,8 +204,29 @@ const initialProducts = [
   },
 ];
 
+export { initialProducts };
+
 /**
- * Exécute l'insertion des données de démonstration dans MongoDB.
+ * Amorçage automatique non-destructif des produits si la base est vide.
+ */
+export const seedInitialProducts = async () => {
+  try {
+    const count = await Product.countDocuments();
+    if (count === 0) {
+      console.log(`[Seeder] Base de produits vide. Insertion de ${initialProducts.length} articles...`);
+      const created = await Product.insertMany(initialProducts);
+      console.log(`[Seeder] ✅ ${created.length} articles insérés avec succès dans MongoDB.`);
+      return created;
+    }
+    return [];
+  } catch (error) {
+    console.error('[Seeder] Erreur lors de l\'auto-seeder des produits :', error.message);
+    return [];
+  }
+};
+
+/**
+ * Exécute l'insertion forcée des données de démonstration dans MongoDB (CLI).
  */
 const seedDatabase = async () => {
   try {
@@ -229,4 +250,8 @@ const seedDatabase = async () => {
   }
 };
 
-seedDatabase();
+// Exécution uniquement si appelé directement via la CLI
+if (process.argv[1]?.endsWith('seedProducts.js')) {
+  seedDatabase();
+}
+

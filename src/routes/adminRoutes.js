@@ -11,6 +11,7 @@ import {
   toggleProductStock,
   uploadProductImage,
   uploadMultipleProductImages,
+  seedProductsAdmin,
 } from '../controllers/adminProductController.js';
 import {
   getAllUsers,
@@ -37,6 +38,7 @@ router.post('/upload-multiple', uploadMultipleImages, uploadMultipleProductImage
 // 4. Gestion du catalogue produits
 router.get('/products', getAllProducts);
 router.post('/products', createProduct);
+router.post('/products/seed', seedProductsAdmin);
 router.put('/products/:id', updateProduct);
 router.delete('/products/:id', deleteProduct);
 router.patch('/products/:id/toggle-stock', toggleProductStock);

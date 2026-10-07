@@ -5,6 +5,7 @@ import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { initSocket } from './config/socket.js';
 import { User } from './models/User.js';
 import { migrateLegacyRoles } from './utils/roleUtils.js';
+import { seedInitialProducts } from './seeders/seedProducts.js';
 import { seedReviews } from './seeders/reviewSeeder.js';
 
 /**
@@ -16,6 +17,9 @@ const startServer = async () => {
 
   // Migration / Normalisation automatique des rôles existants en base
   await migrateLegacyRoles(User);
+
+  // Initialisation automatique du catalogue de produits s'il est vide
+  await seedInitialProducts();
 
   // Initialisation automatique des témoignages s'ils n'existent pas encore
   await seedReviews();

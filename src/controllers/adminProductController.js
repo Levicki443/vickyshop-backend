@@ -262,3 +262,28 @@ export const uploadMultipleProductImages = async (req, res, next) => {
     next(error);
   }
 };
+
+export const seedProductsAdmin = async (req, res, next) => {
+  try {
+    const { initialProducts } = await import('../seeders/seedProducts.js');
+    const count = await Product.countDocuments();
+    let inserted = [];
+
+    if (count === 0) {
+      inserted = await Product.insertMany(initialProducts);
+    } else {
+      inserted = await Product.insertMany(initialProducts);
+    }
+
+    const allProducts = await Product.find({ isArchived: { $ne: true } }).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      status: 'success',
+      message: `${inserted.length} produits restaurés avec succès.`,
+      data: { products: allProducts },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
