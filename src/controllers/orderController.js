@@ -1,19 +1,15 @@
 import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
-import { Notification } from '../models/Notification.js';
 import { ShopSettings } from '../models/ShopSettings.js';
-import { notifyAdmins, notifySeller, notifyUser, notifyOrderUpdate, notifyProductStock, notifyProductUpdated } from '../config/socket.js';
+import { notifyAdmins, notifyOrderUpdate, notifyProductStock, notifyProductUpdated, notifyUser } from '../config/socket.js';
+import { notifyOrderCreated, notifyOrderStatusChanged } from '../services/notificationService.js';
 import { sendOrderConfirmationEmail } from '../services/emailService.js';
 import { isAdminRole } from '../utils/roleUtils.js';
 import { securityLog } from '../utils/securityLogger.js';
 import { sanitizeText } from '../utils/xssSanitizer.js';
+import { computeGlobalOrderStatusFromItems, isValidStateTransition } from '../utils/orderStateMachine.js';
 
-const VALID_ITEM_STATUSES = ['en_attente', 'confirmee', 'en_preparation', 'expediee', 'livree', 'annulee'];
-
-const STATUS_LABELS = {
-  en_attente: 'En attente', confirmee: 'Confirmée', en_preparation: 'En cours de préparation',
-  expediee: 'Prête / En cours de livraison', livree: 'Livrée avec succès', annulee: 'Annulée',
-};
+const VALID_ITEM_STATUSES = ['en_attente', 'confirmee', 'en_preparation', 'expediee', 'en_livraison', 'livree', 'annulee', 'refusee', 'retournee'];
 
 const generateOrderNumber = () => {
   const now = new Date();
@@ -23,10 +19,7 @@ const generateOrderNumber = () => {
 
 export const createOrder = async (req, res, next) => {
   try {
-    const {
-      customerName, customerPhone, customerEmail,
-      deliveryAddress, city, deliveryNotes, items, promoCode,
-    } = req.body;
+    const { customerName, customerPhone, customerEmail, deliveryAddress, city, deliveryNotes, items, promoCode } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ status: 'error', message: 'La commande doit comporter au moins un article.' });
@@ -40,17 +33,12 @@ export const createOrder = async (req, res, next) => {
     const cleanAddress = sanitizeText(deliveryAddress);
     const cleanNotes = deliveryNotes ? sanitizeText(deliveryNotes) : '';
 
-    // Protection anti-doublon / Idempotence (Double-clic dans les 5 dernières secondes)
     const recentDuplicate = await Order.findOne({
       customerPhone: cleanPhone,
       createdAt: { $gte: new Date(Date.now() - 5000) },
     });
     if (recentDuplicate) {
-      return res.status(200).json({
-        status: 'success',
-        message: 'Commande déjà prise en compte.',
-        data: { order: recentDuplicate },
-      });
+      return res.status(200).json({ status: 'success', message: 'Commande déjà prise en compte.', data: { order: recentDuplicate } });
     }
 
     const settings = await ShopSettings.getSettings();
@@ -62,10 +50,7 @@ export const createOrder = async (req, res, next) => {
     let calculatedSubtotal = 0;
 
     for (const item of items) {
-      if (!item.productId) {
-        return res.status(400).json({ status: 'error', message: 'Identifiant produit manquant.' });
-      }
-
+      if (!item.productId) return res.status(400).json({ status: 'error', message: 'Identifiant produit manquant.' });
       const product = await Product.findById(item.productId);
       if (!product || product.isArchived || product.isActive === false) {
         return res.status(400).json({ status: 'error', message: `Le produit "${item.title || item.productId}" n'est plus disponible.` });
@@ -97,10 +82,7 @@ export const createOrder = async (req, res, next) => {
     if (promoCode && typeof promoCode === 'string') {
       const cleanCode = promoCode.trim().toUpperCase();
       if (settings.activePromoCode && cleanCode === settings.activePromoCode.toUpperCase()) {
-        calculatedDiscount = Math.min(
-          calculatedSubtotal,
-          Math.round((calculatedSubtotal * (settings.promoDiscountPercent || 10)) / 100)
-        );
+        calculatedDiscount = Math.min(calculatedSubtotal, Math.round((calculatedSubtotal * (settings.promoDiscountPercent || 10)) / 100));
       }
     }
 
@@ -130,7 +112,19 @@ export const createOrder = async (req, res, next) => {
       paymentMethod: 'livraison',
       paymentStatus: 'en_attente',
       orderStatus: 'recue',
-      statusHistory: [{ status: 'recue', updatedAt: new Date(), comment: 'Commande passée (Paiement espèces à la livraison).' }],
+      statusHistory: [
+        {
+          previousStatus: 'INITIAL',
+          newStatus: 'recue',
+          status: 'recue',
+          updatedAt: new Date(),
+          changedBy: req.user ? req.user._id : null,
+          changedByName: cleanName,
+          changedByRole: req.user ? 'client' : 'systeme',
+          comment: 'Commande passée avec succès (Paiement en espèces à la livraison).',
+          orderNumber,
+        },
+      ],
     });
 
     for (const item of enrichedItems) {
@@ -152,65 +146,7 @@ export const createOrder = async (req, res, next) => {
     }
 
     try { notifyAdmins('order:new', order); } catch (e) {}
-
-    if (order.customerId) {
-      Notification.create({
-        userId: order.customerId,
-        role: 'client',
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        title: 'Commande validée avec succès 🎉',
-        message: `Votre commande #${order.orderNumber} de ${order.total} FCFA a été transmise.`,
-        type: 'order_new',
-      }).catch(() => {});
-
-      try {
-        notifyUser(order.customerId, 'order:client:created', {
-          orderNumber: order.orderNumber,
-          total: order.total,
-          status: 'recue',
-        });
-      } catch (e) {}
-    }
-
-    const sellersMap = {};
-    enrichedItems.forEach((item) => {
-      if (item.sellerId) {
-        const sId = item.sellerId.toString();
-        if (!sellersMap[sId]) sellersMap[sId] = [];
-        sellersMap[sId].push(item);
-      }
-    });
-
-    for (const [sId, sellerItems] of Object.entries(sellersMap)) {
-      const sellerSubtotal = sellerItems.reduce((acc, i) => acc + i.price * i.quantity, 0);
-      const itemsListStr = sellerItems.map((i) => `${i.quantity}x ${i.title}`).join(', ');
-
-      Notification.create({
-        sellerId: sId,
-        role: 'vendeur',
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        title: 'Nouvelle commande reçue 🔔',
-        message: `Le client ${order.customerName} a commandé : ${itemsListStr} (Sous-total : ${sellerSubtotal} FCFA).`,
-        type: 'order_new',
-      }).catch(() => {});
-
-      try {
-        notifySeller(sId, 'order:seller:new', {
-          orderId: order._id,
-          orderNumber: order.orderNumber,
-          customerName: order.customerName,
-          customerPhone: order.customerPhone,
-          city: order.city,
-          deliveryAddress: order.deliveryAddress,
-          items: sellerItems,
-          total: sellerSubtotal,
-          amountToCollect: sellerSubtotal,
-          createdAt: order.createdAt,
-        });
-      } catch (err) {}
-    }
+    notifyOrderCreated(order).catch((err) => console.warn('[OrderController] Erreur dispatch notifs :', err.message));
 
     if (order.customerEmail) {
       sendOrderConfirmationEmail(order).catch(() => {});
@@ -242,7 +178,7 @@ export const getOrderByNumber = async (req, res, next) => {
       return res.status(200).json({ status: 'success', data: { order } });
     }
 
-    const sanitizedPublicOrder = {
+    const sanitized = {
       orderNumber: order.orderNumber,
       orderStatus: order.orderStatus,
       paymentMethod: order.paymentMethod,
@@ -254,10 +190,13 @@ export const getOrderByNumber = async (req, res, next) => {
       statusHistory: order.statusHistory || [],
       createdAt: order.createdAt,
       itemsCount: order.items.length,
-      items: order.items.map((i) => ({ title: i.title, quantity: i.quantity, price: i.price, status: i.status })),
+      items: order.items.map((i) => ({
+        title: i.title, quantity: i.quantity, price: i.price, status: i.status,
+        sellerName: i.sellerName, size: i.size, color: i.color, image: i.image,
+      })),
     };
 
-    res.status(200).json({ status: 'success', data: { order: sanitizedPublicOrder } });
+    res.status(200).json({ status: 'success', data: { order: sanitized } });
   } catch (error) { next(error); }
 };
 
@@ -277,23 +216,11 @@ export const getSellerOrders = async (req, res, next) => {
     const sellerOrders = orders.map((order) => {
       const sellerItems = order.items.filter((item) => item.sellerId && item.sellerId.toString() === sellerId.toString());
       const sellerTotal = sellerItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
-
       return {
-        _id: order._id,
-        orderNumber: order.orderNumber,
-        createdAt: order.createdAt,
-        updatedAt: order.updatedAt,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        deliveryAddress: order.deliveryAddress,
-        city: order.city,
-        items: sellerItems,
-        sellerTotal,
-        amountToCollect: sellerTotal,
-        paymentMethod: order.paymentMethod,
-        paymentStatus: order.paymentStatus,
-        orderStatus: order.orderStatus,
-        statusHistory: order.statusHistory || [],
+        _id: order._id, orderNumber: order.orderNumber, createdAt: order.createdAt, updatedAt: order.updatedAt,
+        customerName: order.customerName, customerPhone: order.customerPhone, deliveryAddress: order.deliveryAddress,
+        city: order.city, items: sellerItems, sellerTotal, amountToCollect: sellerTotal, paymentMethod: order.paymentMethod,
+        paymentStatus: order.paymentStatus, orderStatus: order.orderStatus, statusHistory: order.statusHistory || [],
       };
     });
 
@@ -304,7 +231,7 @@ export const getSellerOrders = async (req, res, next) => {
 export const updateSellerOrderItemStatus = async (req, res, next) => {
   try {
     const { orderId, itemId } = req.params;
-    const { status } = req.body;
+    const { status, comment } = req.body;
 
     if (!VALID_ITEM_STATUSES.includes(status)) {
       return res.status(400).json({ status: 'error', message: `Statut invalide. Valeurs autorisées : ${VALID_ITEM_STATUSES.join(', ')}` });
@@ -317,45 +244,40 @@ export const updateSellerOrderItemStatus = async (req, res, next) => {
     if (!item) return res.status(404).json({ status: 'error', message: 'Article introuvable.' });
 
     if (!isAdminRole(req.user.role) && (!item.sellerId || item.sellerId.toString() !== req.user._id.toString())) {
-      securityLog.accessDenied({ userId: req.user._id, role: req.user.role, route: req.originalUrl, method: 'PATCH', reason: 'Tentative de modification d\'un article appartenant à un autre vendeur' });
+      securityLog.accessDenied({ userId: req.user._id, role: req.user.role, route: req.originalUrl, method: 'PATCH', reason: 'Tentative de modification d\'un article tiers' });
       return res.status(403).json({ status: 'error', message: 'Accès refusé. Vous ne pouvez modifier que vos propres articles.' });
     }
 
     const prevStatus = item.status || 'en_attente';
     item.status = status;
-    const statusLabel = STATUS_LABELS[status] || status;
+
+    const previousGlobalStatus = order.orderStatus;
+    const newGlobalStatus = computeGlobalOrderStatusFromItems(order.items);
+    order.orderStatus = newGlobalStatus;
 
     order.statusHistory.push({
-      status: `Article "${item.title}" : [${prevStatus}] -> [${status}]`,
+      previousStatus: prevStatus,
+      newStatus: status,
+      status: newGlobalStatus,
       updatedAt: new Date(),
-      comment: `Mis à jour par ${req.user.name} (${req.user.role === 'vendeur' ? 'Vendeur' : 'Admin'})`,
+      changedBy: req.user._id,
+      changedByName: req.user.name,
+      changedByRole: req.user.role === 'vendeur' ? 'vendeur' : 'admin',
+      comment: comment || `Article "${item.title}" passé à "${status}" par ${req.user.name}.`,
+      orderNumber: order.orderNumber,
     });
     await order.save();
 
-    if (order.customerId) {
-      Notification.create({
-        userId: order.customerId,
-        role: 'client',
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        title: `Mise à jour : ${item.title}`,
-        message: `Votre article #${order.orderNumber} est désormais : ${statusLabel}.`,
-        type: 'order_status',
-      }).catch(() => {});
-
-      try {
-        notifyUser(order.customerId, 'order:client:update', {
-          orderNumber: order.orderNumber,
-          status,
-          statusLabel,
-          itemTitle: item.title,
-          updatedAt: new Date(),
-        });
-      } catch (e) {}
-    }
+    notifyOrderStatusChanged(order, newGlobalStatus, item.title).catch((e) => console.warn('[OrderController] Notif status update :', e.message));
 
     try {
       notifyOrderUpdate(order.orderNumber, 'order:updated', order);
+      const updatePayload = {
+        orderNumber: order.orderNumber, orderStatus: order.orderStatus,
+        statusHistory: order.statusHistory, items: order.items, updatedAt: new Date(),
+      };
+      notifyOrderUpdate(order.orderNumber, 'order:status_updated', updatePayload);
+      if (order.customerId) notifyUser(order.customerId.toString(), 'order:status_updated', updatePayload);
       notifyAdmins('order:updated', order);
     } catch (e) {}
 
@@ -378,33 +300,13 @@ export const confirmOrderPayment = async (req, res, next) => {
     });
     await order.save();
 
-    if (order.customerId) {
-      Notification.create({
-        userId: order.customerId,
-        role: 'client',
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        title: 'Paiement Validé ✅',
-        message: `L'encaissement en espèces de votre commande #${order.orderNumber} a été validé.`,
-        type: 'order_status',
-      }).catch(() => {});
-
-      try {
-        notifyUser(order.customerId, 'order:client:update', {
-          orderNumber: order.orderNumber,
-          paymentStatus: 'paye',
-          updatedAt: new Date(),
-        });
-      } catch (e) {}
-    }
-
+    notifyOrderStatusChanged(order, 'livree', 'Paiement validé').catch(() => {});
     try {
       notifyOrderUpdate(order.orderNumber, 'order:updated', order);
       notifyAdmins('order:updated', order);
     } catch (e) {}
 
     securityLog.adminAction({ action: 'VALIDATION_PAIEMENT_COMMANDE', targetResource: 'Order', userId: req.user._id, details: { orderNumber: order.orderNumber, total: order.total }, ip: req.ip });
-
     res.status(200).json({ status: 'success', message: 'Encaissement confirmé avec succès.', data: { order } });
   } catch (error) { next(error); }
 };

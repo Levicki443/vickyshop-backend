@@ -50,7 +50,7 @@ const orderItemSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['en_attente', 'confirmee', 'en_preparation', 'expediee', 'livree', 'annulee'],
+      enum: ['en_attente', 'confirmee', 'en_preparation', 'expediee', 'en_livraison', 'livree', 'annulee', 'refusee', 'retournee'],
       default: 'en_attente',
     },
   },
@@ -152,7 +152,18 @@ const orderSchema = new mongoose.Schema(
     },
     orderStatus: {
       type: String,
-      enum: ['recue', 'confirmee', 'en_preparation', 'en_livraison', 'livree', 'annulee', 'echec_livraison', 'refusee'],
+      enum: [
+        'recue',
+        'confirmee',
+        'en_preparation',
+        'expediee',
+        'en_livraison',
+        'livree',
+        'annulee',
+        'refusee',
+        'retournee',
+        'echec_livraison',
+      ],
       default: 'recue',
       index: true,
     },
@@ -171,9 +182,19 @@ const orderSchema = new mongoose.Schema(
     },
     statusHistory: [
       {
+        previousStatus: { type: String, default: '' },
+        newStatus: { type: String, default: '' },
         status: { type: String, required: true },
         updatedAt: { type: Date, default: Date.now },
+        changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+        changedByName: { type: String, default: '' },
+        changedByRole: {
+          type: String,
+          enum: ['vendeur', 'admin', 'client', 'systeme', 'livreur'],
+          default: 'systeme',
+        },
         comment: { type: String, default: '' },
+        orderNumber: { type: String, default: '' },
       },
     ],
   },

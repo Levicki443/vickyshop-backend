@@ -4,7 +4,7 @@
  * dans req.body, req.query et req.params afin de protéger MongoDB / Mongoose.
  */
 
-const cleanObject = (obj) => {
+export const cleanObject = (obj) => {
   if (!obj || typeof obj !== 'object') {
     return obj;
   }
@@ -30,6 +30,8 @@ const cleanObject = (obj) => {
 
   return cleaned;
 };
+
+export const sanitizeNoSqlValue = cleanObject;
 
 export const sanitizeNoSql = (req, res, next) => {
   if (req.body) {

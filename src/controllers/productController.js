@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { Product } from '../models/Product.js';
 import { Order } from '../models/Order.js';
 import { notifyProductCreated, notifyProductUpdated, notifyProductDeleted } from '../config/socket.js';
+import { notifyNewProductPublished, notifyProductPriceDrop } from '../services/notificationService.js';
 import { isAdminRole, isSellerRole } from '../utils/roleUtils.js';
 
 /**
@@ -100,7 +101,7 @@ export const getMyProducts = async (req, res, next) => {
 };
 
 /**
- * Crée un nouveau produit (associé au vendeur connecté ou admin).
+ * Crée un nouveau produit (associé au vendeur connecté ou admin) et alerte les clients.
  */
 export const createProduct = async (req, res, next) => {
   try {
@@ -114,6 +115,7 @@ export const createProduct = async (req, res, next) => {
 
     try {
       notifyProductCreated(newProduct);
+      notifyNewProductPublished(newProduct).catch(() => {});
     } catch (sErr) {
       console.warn('[Socket.IO] Erreur notification création produit :', sErr.message);
     }
@@ -129,7 +131,7 @@ export const createProduct = async (req, res, next) => {
 };
 
 /**
- * Modifie un produit existant (protégé par checkProductOwnership).
+ * Modifie un produit existant et alerte les clients en cas de baisse de prix.
  */
 export const updateProduct = async (req, res, next) => {
   try {
@@ -153,6 +155,13 @@ export const updateProduct = async (req, res, next) => {
       'isActive',
     ];
 
+    const currentProduct = await Product.findById(req.params.id);
+    if (!currentProduct) {
+      return res.status(404).json({ status: 'error', message: 'Produit introuvable.' });
+    }
+
+    const previousPrice = currentProduct.price;
+
     const updates = {};
     for (const key of allowedFields) {
       if (req.body[key] !== undefined) {
@@ -160,7 +169,6 @@ export const updateProduct = async (req, res, next) => {
       }
     }
 
-    // Mise à jour de la disponibilité du stock automatique
     if (updates.stockQuantity !== undefined) {
       updates.inStock = Number(updates.stockQuantity) > 0;
     }
@@ -170,6 +178,11 @@ export const updateProduct = async (req, res, next) => {
       { $set: updates },
       { new: true, runValidators: true }
     );
+
+    // Déclenchement de l'alerte baisse de prix si le prix a diminué
+    if (updates.price !== undefined && Number(updates.price) < Number(previousPrice)) {
+      notifyProductPriceDrop(updatedProduct, previousPrice, updates.price).catch(() => {});
+    }
 
     try {
       notifyProductUpdated(updatedProduct);
@@ -188,14 +201,11 @@ export const updateProduct = async (req, res, next) => {
 };
 
 /**
- * Supprime ou archive intelligemment un produit (protégé par checkProductOwnership).
- * Si le produit a un historique de commandes, il est archivé afin de préserver l'intégrité comptable.
+ * Supprime ou archive intelligemment un produit.
  */
 export const deleteProduct = async (req, res, next) => {
   try {
     const productId = req.params.id;
-
-    // Vérifie si le produit possède des commandes enregistrées
     const hasOrderHistory = await Order.exists({ 'items.productId': productId });
 
     if (hasOrderHistory) {
@@ -216,7 +226,6 @@ export const deleteProduct = async (req, res, next) => {
       });
     }
 
-    // Si aucune commande n'existe pour cet article, suppression définitive
     await Product.findByIdAndDelete(productId);
 
     try {

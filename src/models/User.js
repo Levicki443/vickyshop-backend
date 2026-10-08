@@ -5,8 +5,8 @@ import { generateRandomToken, hashToken } from '../utils/cryptoUtils.js';
 
 /**
  * Schéma Mongoose pour les Utilisateurs de Vicky-Shop (Clients, Vendeurs, Administrateurs).
- * Inclut la gestion du verrouillage temporaire de compte, de la réinitialisation de mot de passe
- * et du contrôle d'accès basé sur les rôles (RBAC).
+ * Inclut la gestion du verrouillage temporaire de compte, de la réinitialisation de mot de passe,
+ * des préférences de notification fines, des abonnements Web Push et du contrôle d'accès RBAC.
  */
 const userSchema = new mongoose.Schema(
   {
@@ -88,6 +88,38 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Préférences de Notifications (Client & Vendeur)
+    notificationPreferences: {
+      orders: { type: Boolean, default: true },
+      delivery: { type: Boolean, default: true },
+      newProducts: { type: Boolean, default: true },
+      priceDrops: { type: Boolean, default: true },
+      promotions: { type: Boolean, default: true },
+      pushNotifications: { type: Boolean, default: true },
+      soundEnabled: { type: Boolean, default: true },
+      sellerNewOrders: { type: Boolean, default: true },
+      sellerOrderStatus: { type: Boolean, default: true },
+      sellerStockAlerts: { type: Boolean, default: true },
+    },
+    // Abonnements Web Push Navigateur / Mobile (PWA)
+    pushSubscriptions: [
+      {
+        endpoint: { type: String, required: true },
+        keys: {
+          p256dh: { type: String, required: true },
+          auth: { type: String, required: true },
+        },
+        deviceType: { type: String, default: 'browser' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    // Liste des produits favoris suivis (pour alertes baisses de prix et promotions)
+    favorites: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Product',
+      },
+    ],
     // Sécurité : Tentatives infructueuses et verrouillage temporaire (Anti-Bruteforce)
     failedLoginAttempts: {
       type: Number,

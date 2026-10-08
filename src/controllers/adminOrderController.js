@@ -6,6 +6,7 @@ import {
   notifyProductStock,
   notifyProductUpdated,
 } from '../config/socket.js';
+import { notifyOrderStatusChanged } from '../services/notificationService.js';
 import { sendOrderStatusUpdateEmail } from '../services/emailService.js';
 import { securityLog } from '../utils/securityLogger.js';
 import {
@@ -131,9 +132,15 @@ export const updateOrderStatus = async (req, res, next) => {
         order.statusHistory = [];
       }
       order.statusHistory.push({
+        previousStatus,
+        newStatus: orderStatus,
         status: orderStatus,
         updatedAt: new Date(),
+        changedBy: req.user._id,
+        changedByName: req.user.name,
+        changedByRole: 'admin',
         comment: comment || `Statut passé de '${previousStatus}' à '${orderStatus}' par l'administrateur.`,
+        orderNumber: order.orderNumber,
       });
     }
 
@@ -143,9 +150,23 @@ export const updateOrderStatus = async (req, res, next) => {
 
     await order.save();
 
+    // Notification client temps réel & push
+    if (orderStatus && orderStatus !== previousStatus) {
+      notifyOrderStatusChanged(order, orderStatus).catch((err) =>
+        console.warn('[AdminOrder] Erreur notification statut :', err.message)
+      );
+    }
+
     try {
       notifyAdmins('order:updated', order);
       notifyOrderUpdate(order.orderNumber, 'order:updated', order);
+      notifyOrderUpdate(order.orderNumber, 'order:status_updated', {
+        orderNumber: order.orderNumber,
+        orderStatus: order.orderStatus,
+        statusHistory: order.statusHistory,
+        items: order.items,
+        updatedAt: new Date(),
+      });
     } catch (socketErr) {}
 
     if (orderStatus && orderStatus !== previousStatus && order.customerEmail) {
