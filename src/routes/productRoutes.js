@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getProducts,
   getProductById,
+  getSimilarProducts,
   getMyProducts,
   createProduct,
   updateProduct,
@@ -14,6 +15,7 @@ const router = express.Router();
 // Routes publiques
 router.get('/', getProducts);
 router.get('/my-products', protect, requireSeller, getMyProducts);
+router.get('/:id/similar', getSimilarProducts);
 router.get('/:id', getProductById);
 
 // Routes sécurisées Vendeurs / Admins avec vérification de propriété

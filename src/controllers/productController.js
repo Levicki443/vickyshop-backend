@@ -3,6 +3,7 @@ import { Product } from '../models/Product.js';
 import { Order } from '../models/Order.js';
 import { notifyProductCreated, notifyProductUpdated, notifyProductDeleted } from '../config/socket.js';
 import { notifyNewProductPublished, notifyProductPriceDrop } from '../services/notificationService.js';
+import { findSimilarProducts } from '../services/recommendationService.js';
 import { isAdminRole, isSellerRole } from '../utils/roleUtils.js';
 
 /**
@@ -243,3 +244,34 @@ export const deleteProduct = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Récupère des recommandations de produits similaires basées sur une correspondance intelligente :
+ * Catégorie stricte, type sémantique exact, sous-catégorie, marque et proximité de prix.
+ */
+export const getSimilarProducts = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 4, 1), 12);
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: 'error', message: 'Identifiant de produit invalide.' });
+    }
+
+    const currentProduct = await Product.findById(id);
+    if (!currentProduct || currentProduct.isArchived) {
+      return res.status(404).json({ status: 'error', message: 'Produit introuvable.' });
+    }
+
+    const products = await findSimilarProducts(currentProduct, limit);
+
+    res.status(200).json({
+      status: 'success',
+      results: products.length,
+      data: { products },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
