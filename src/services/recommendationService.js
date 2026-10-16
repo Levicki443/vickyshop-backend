@@ -122,6 +122,7 @@ export const findSimilarProducts = async (currentProduct, limit = 4) => {
     isActive: { $ne: false },
     inStock: true,
     stockQuantity: { $gt: 0 },
+    image: { $not: /unsplash\.com/i }, // Règle stricte : Exclure tout produit maquette/unsplash
   };
 
   if (targetSubCategory) {
@@ -133,9 +134,33 @@ export const findSimilarProducts = async (currentProduct, limit = 4) => {
     query.category = currentProduct.category;
   }
 
-  const candidates = await Product.find(query)
+  let candidates = await Product.find(query)
     .populate('seller', 'name shopName isSellerActive')
     .lean();
+
+  // Si aucun candidat direct dans la catégorie/sous-catégorie, élargissement aux autres vrais articles du BackOffice
+  if (candidates.length < limit) {
+    const fallbackQuery = {
+      _id: { $ne: currentProduct._id },
+      isArchived: { $ne: true },
+      isActive: { $ne: false },
+      inStock: true,
+      stockQuantity: { $gt: 0 },
+      image: { $not: /unsplash\.com/i },
+    };
+    const additional = await Product.find(fallbackQuery)
+      .populate('seller', 'name shopName isSellerActive')
+      .limit(limit * 2)
+      .lean();
+
+    const seenIds = new Set(candidates.map((c) => String(c._id)));
+    for (const item of additional) {
+      if (!seenIds.has(String(item._id))) {
+        candidates.push(item);
+        seenIds.add(String(item._id));
+      }
+    }
+  }
 
   if (!candidates.length) return [];
 
@@ -143,11 +168,6 @@ export const findSimilarProducts = async (currentProduct, limit = 4) => {
 
   for (const cand of candidates) {
     const candFamily = detectProductFamily(cand);
-
-    // Règle d'or : Étanchéité taxonomique absolue
-    if (targetFamily !== 'general' && candFamily !== 'general' && targetFamily !== candFamily) {
-      continue;
-    }
 
     let score = 0;
 
@@ -162,24 +182,29 @@ export const findSimilarProducts = async (currentProduct, limit = 4) => {
       score += 30;
     }
 
-    // 3. Priorité 3 : Même marque (hors générique)
+    // 3. Priorité 3 : Même catégorie principale
+    if (currentProduct.category && cand.category && currentProduct.category.toLowerCase() === cand.category.toLowerCase()) {
+      score += 25;
+    }
+
+    // 4. Priorité 4 : Même marque (hors générique)
     const candBrand = (cand.brand || '').trim().toLowerCase();
     if (
       targetBrand &&
       !['generique', 'générique', 'autre', ''].includes(targetBrand) &&
       targetBrand === candBrand
     ) {
-      score += 25;
+      score += 20;
     }
 
-    // 4. Priorité 4 : Termes descriptifs et caractéristiques communes
+    // 5. Priorité 5 : Termes descriptifs et caractéristiques communes
     const candTokens = extractDescriptiveTokens(`${cand.title || ''} ${cand.description || ''}`);
     const sharedTokens = targetTokens.filter((token) => candTokens.includes(token));
     if (sharedTokens.length > 0) {
       score += Math.min(30, sharedTokens.length * 10);
     }
 
-    // 5. Priorité 5 : Proximité tarifaire
+    // 6. Proximité tarifaire
     const candPrice = Number(cand.price) || 0;
     if (targetPrice > 0 && candPrice > 0) {
       const ratio = Math.abs(targetPrice - candPrice) / targetPrice;
@@ -187,12 +212,10 @@ export const findSimilarProducts = async (currentProduct, limit = 4) => {
       else if (ratio <= 0.60) score += 8;
     }
 
-    // 6. Bonus qualité client
+    // 7. Bonus qualité client
     if (cand.rating >= 4.5) score += 5;
 
-    if (score >= 80) {
-      scoredCandidates.push({ product: cand, score });
-    }
+    scoredCandidates.push({ product: cand, score });
   }
 
   return scoredCandidates

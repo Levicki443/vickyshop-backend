@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { generateUniqueProductSlug } from '../utils/slugUtils.js';
 
 /**
  * Schéma Mongoose pour les Produits du catalogue Vicky-Shop / Marketplace.
@@ -7,6 +8,14 @@ import mongoose from 'mongoose';
  */
 const productSchema = new mongoose.Schema(
   {
+    slug: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      index: true,
+      unique: true,
+      sparse: true,
+    },
     seller: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -147,18 +156,29 @@ productSchema.virtual('discountPercent').get(function () {
   return 0;
 });
 
-// Middleware pre-save pour synchroniser inStock avec stockQuantity
-productSchema.pre('save', function (next) {
+// Middleware pre-save pour synchroniser inStock et assigner un slug unique permanent
+productSchema.pre('save', async function (next) {
   if (this.stockQuantity <= 0) {
     this.inStock = false;
     this.stockQuantity = 0;
   } else {
     this.inStock = true;
   }
+
+  // Attribution d'un slug pérenne si non défini
+  if (!this.slug && this.title) {
+    try {
+      this.slug = await generateUniqueProductSlug(this.title, this.constructor, this._id);
+    } catch (err) {
+      return next(err);
+    }
+  }
+
   next();
 });
 
 // Indexation optimisée
+productSchema.index({ slug: 1 }, { unique: true, sparse: true });
 productSchema.index({ seller: 1, isArchived: 1, createdAt: -1 });
 productSchema.index({ category: 1, price: 1, inStock: 1, isActive: 1 });
 productSchema.index({ title: 'text', description: 'text', reference: 'text', brand: 'text' });

@@ -53,21 +53,28 @@ export const getProducts = async (req, res, next) => {
 };
 
 /**
- * Récupère un produit spécifique par son identifiant avec validation stricte.
+ * Récupère un produit spécifique par son identifiant ou son slug avec validation et masquage strict.
  */
 export const getProductById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    if (!id || typeof id !== 'string' || !id.trim()) {
       return res.status(404).json({
         status: 'error',
-        message: 'Identifiant de produit invalide ou inexistant.',
+        message: 'Identifiant ou slug de produit manquant.',
       });
     }
 
-    const product = await Product.findById(id).populate('seller', 'name shopName shopPhone');
-    if (!product || product.isArchived) {
+    const cleanIdentifier = id.trim();
+    const isObjectId = mongoose.Types.ObjectId.isValid(cleanIdentifier);
+
+    const query = isObjectId
+      ? { $or: [{ _id: cleanIdentifier }, { slug: cleanIdentifier.toLowerCase() }], isArchived: { $ne: true } }
+      : { slug: cleanIdentifier.toLowerCase(), isArchived: { $ne: true } };
+
+    const product = await Product.findOne(query).populate('seller', 'name shopName shopPhone isSellerActive');
+    if (!product) {
       return res.status(404).json({
         status: 'error',
         message: 'Produit introuvable ou retiré de la vente.',
@@ -254,12 +261,18 @@ export const getSimilarProducts = async (req, res, next) => {
     const { id } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 4, 1), 12);
 
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ status: 'error', message: 'Identifiant de produit invalide.' });
+    if (!id || typeof id !== 'string' || !id.trim()) {
+      return res.status(400).json({ status: 'error', message: 'Identifiant ou slug de produit requis.' });
     }
 
-    const currentProduct = await Product.findById(id);
-    if (!currentProduct || currentProduct.isArchived) {
+    const cleanIdentifier = id.trim();
+    const isObjectId = mongoose.Types.ObjectId.isValid(cleanIdentifier);
+    const query = isObjectId
+      ? { $or: [{ _id: cleanIdentifier }, { slug: cleanIdentifier.toLowerCase() }], isArchived: { $ne: true } }
+      : { slug: cleanIdentifier.toLowerCase(), isArchived: { $ne: true } };
+
+    const currentProduct = await Product.findOne(query);
+    if (!currentProduct) {
       return res.status(404).json({ status: 'error', message: 'Produit introuvable.' });
     }
 

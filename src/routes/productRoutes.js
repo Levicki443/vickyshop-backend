@@ -8,6 +8,7 @@ import {
   updateProduct,
   deleteProduct,
 } from '../controllers/productController.js';
+import { getProductSharePreview } from '../controllers/sharePreviewController.js';
 import { protect, requireSeller, checkProductOwnership } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
@@ -15,6 +16,8 @@ const router = express.Router();
 // Routes publiques
 router.get('/', getProducts);
 router.get('/my-products', protect, requireSeller, getMyProducts);
+router.get('/:identifier/preview', getProductSharePreview);
+router.get('/share/:identifier', getProductSharePreview);
 router.get('/:id/similar', getSimilarProducts);
 router.get('/:id', getProductById);
 
