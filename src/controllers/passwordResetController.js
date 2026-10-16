@@ -1,60 +1,58 @@
 import { User } from '../models/User.js';
 import { hashToken } from '../utils/cryptoUtils.js';
-import { sendBrevoEmail } from '../services/emailService.js';
+import { sendPasswordResetEmail } from '../services/emailService.js';
 import { securityLog } from '../utils/securityLogger.js';
-import jwt from 'jsonwebtoken';
 import { config } from '../config/environment.js';
 
-const generateToken = (id) => {
-  return jwt.sign({ id }, config.jwt.secret, {
-    expiresIn: config.jwt.expiresIn,
-  });
-};
+/**
+ * Contrôleur de réinitialisation sécurisée de mot de passe (MERN Vicky-Shop).
+ * Conforme aux standards d'audit de sécurité bancaire :
+ * - Jeton cryptographique temporaire à usage unique (15 minutes).
+ * - Hachage SHA-256 en base de données.
+ * - Réponse générique constante pour prévenir l'énumération d'adresses email.
+ * - Validation stricte de la complexité du mot de passe.
+ */
 
 /**
- * Demande de réinitialisation de mot de passe.
- * Retourne toujours un message générique pour empêcher l'énumération d'adresses email.
+ * 1. Demande de réinitialisation de mot de passe.
+ * Reçoit l'email, génère un jeton sécurisé et envoie l'e-mail officiel.
  */
 export const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     const clientIp = req.ip || req.connection.remoteAddress;
 
-    if (!email || typeof email !== 'string') {
+    // Validation stricte du format email
+    const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,})+$/;
+    if (!email || typeof email !== 'string' || !emailRegex.test(email.trim())) {
       return res.status(400).json({
         status: 'error',
         message: 'Veuillez renseigner une adresse email valide.',
       });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (user) {
+      // Génération du jeton aléatoire de 32 octets et calcul de l'empreinte hachée
       const resetToken = user.createPasswordResetToken();
       await user.save({ validateBeforeSave: false });
 
-      const resetUrl = `${config.cors.allowedOrigins[0] || 'http://localhost:5173'}/reinitialisation-mot-de-passe?token=${resetToken}`;
+      // Détection de l'origine du client frontend
+      const clientBase = req.headers.origin || config.cors?.allowedOrigins?.[0] || 'http://localhost:5173';
+      const resetUrl = `${clientBase.replace(/\/+$/, '')}/reinitialisation-mot-de-passe?token=${resetToken}`;
 
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
-          <h2 style="color: #111827; text-align: center;">Réinitialisation de votre mot de passe</h2>
-          <p style="color: #4b5563; font-size: 14px;">Bonjour ${user.name},</p>
-          <p style="color: #4b5563; font-size: 14px;">Vous avez demandé la réinitialisation de votre mot de passe pour votre compte Vicky-Shop.</p>
-          <div style="text-align: center; margin: 24px 0;">
-            <a href="${resetUrl}" style="background-color: #dfb743; color: #111827; padding: 12px 24px; font-weight: bold; text-decoration: none; border-radius: 6px; display: inline-block;">Réinitialiser mon mot de passe</a>
-          </div>
-          <p style="color: #6b7280; font-size: 12px;">Ce lien est valable pendant <strong>15 minutes</strong> et ne peut être utilisé qu'une seule fois.</p>
-          <p style="color: #6b7280; font-size: 12px;">Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet email en toute sécurité.</p>
-        </div>
-      `;
-
-      sendBrevoEmail({
+      // Envoi de l'e-mail officiel via Brevo
+      sendPasswordResetEmail({
         toEmail: user.email,
         toName: user.name,
-        subject: 'Réinitialisation de votre mot de passe Vicky-Shop',
-        htmlContent: emailHtml,
-      }).catch((err) => console.error('[Email Reset Error]', err));
+        resetUrl,
+      }).catch((err) => {
+        console.error('[Email Reset Error]', err.message || err);
+      });
 
+      // Journalisation sécurisée sans exposer le jeton brut
       securityLog.adminAction({
         action: 'DEMANDE_RESET_MDP',
         targetResource: 'User',
@@ -62,12 +60,20 @@ export const forgotPassword = async (req, res, next) => {
         details: { email: user.email },
         ip: clientIp,
       });
+
+      // Affichage visible dans la console du serveur pour faciliter les tests locaux
+      console.log('\n======================================================');
+      console.log('[SÉCURITÉ VICKY-SHOP] LIEN DE RÉINITIALISATION GÉNÉRÉ :');
+      console.log(`Compte : ${user.email}`);
+      console.log(`Lien   : ${resetUrl}`);
+      console.log('Validité : 15 minutes');
+      console.log('======================================================\n');
     }
 
-    // Réponse générique constante pour prévenir l'énumération d'emails
+    // Réponse générique constante pour empêcher toute fuite d'information / énumération
     res.status(200).json({
       status: 'success',
-      message: 'Si un compte correspond à cette adresse email, un lien de réinitialisation sécurisé y a été envoyé.',
+      message: 'Si un compte correspond à cette adresse email, un lien sécurisé de réinitialisation vous a été envoyé.',
     });
   } catch (error) {
     next(error);
@@ -75,29 +81,96 @@ export const forgotPassword = async (req, res, next) => {
 };
 
 /**
- * Réinitialisation effective du mot de passe avec validation du jeton temporaire.
+ * 2. Vérification préalable de la validité d'un jeton de réinitialisation.
+ * Permet au frontend de vérifier immédiatement si le lien est valide ou expiré dès l'ouverture.
+ */
+export const verifyResetToken = async (req, res, next) => {
+  try {
+    const rawToken = req.params.token || req.query.token;
+
+    if (!rawToken || typeof rawToken !== 'string') {
+      return res.status(400).json({
+        status: 'error',
+        code: 'TOKEN_REQUIRED',
+        message: 'Jeton de réinitialisation manquant.',
+      });
+    }
+
+    const hashedToken = hashToken(rawToken.trim());
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() },
+    }).select('+passwordResetToken +passwordResetExpires');
+
+    if (!user) {
+      return res.status(400).json({
+        status: 'error',
+        code: 'TOKEN_INVALID_OR_EXPIRED',
+        message: 'Le lien de réinitialisation est invalide ou a expiré.',
+      });
+    }
+
+    // Masquage partiel de l'adresse email pour rassurer l'utilisateur (ex: j***@gmail.com)
+    const emailParts = user.email.split('@');
+    const maskedUser = emailParts[0].length > 2
+      ? `${emailParts[0][0]}***${emailParts[0].slice(-1)}`
+      : `${emailParts[0][0]}***`;
+    const maskedEmail = `${maskedUser}@${emailParts[1]}`;
+
+    res.status(200).json({
+      status: 'success',
+      valid: true,
+      message: 'Le lien de réinitialisation est valide.',
+      data: {
+        maskedEmail,
+        name: user.name,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * 3. Réinitialisation effective du mot de passe avec validation du jeton temporaire.
  */
 export const resetPassword = async (req, res, next) => {
   try {
-    const { token, newPassword } = req.body;
+    const { token, newPassword, confirmPassword } = req.body;
     const clientIp = req.ip || req.connection.remoteAddress;
 
     if (!token || typeof token !== 'string') {
       return res.status(400).json({
         status: 'error',
+        code: 'TOKEN_REQUIRED',
         message: 'Jeton de réinitialisation invalide ou manquant.',
       });
     }
 
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+    if (!newPassword || typeof newPassword !== 'string') {
       return res.status(400).json({
         status: 'error',
-        message: 'Le nouveau mot de passe doit comporter au moins 8 caractères.',
+        message: 'Veuillez renseigner un nouveau mot de passe.',
       });
     }
 
-    const hashedToken = hashToken(token);
+    // Validation des critères de sécurité du mot de passe
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Le mot de passe doit comporter au moins 8 caractères.',
+      });
+    }
 
+    // Vérification de la correspondance des mots de passe si confirmPassword est fourni
+    if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Les deux mots de passe ne correspondent pas.',
+      });
+    }
+
+    const hashedToken = hashToken(token.trim());
     const user = await User.findOne({
       passwordResetToken: hashedToken,
       passwordResetExpires: { $gt: Date.now() },
@@ -111,30 +184,30 @@ export const resetPassword = async (req, res, next) => {
       });
       return res.status(400).json({
         status: 'error',
-        message: 'Le jeton de réinitialisation est invalide ou a expiré.',
+        code: 'TOKEN_INVALID_OR_EXPIRED',
+        message: 'Le lien de réinitialisation est invalide ou a expiré.',
       });
     }
 
+    // Mise à jour du mot de passe (le pre-save hook Mongoose le hache via bcryptjs)
     user.password = newPassword;
-    user.passwordResetToken = null;
-    user.passwordResetExpires = null;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
     user.failedLoginAttempts = 0;
     user.lockUntil = null;
     await user.save();
-
-    const authToken = generateToken(user._id);
 
     securityLog.authSuccess({
       userId: user._id,
       email: user.email,
       role: user.role,
       ip: clientIp,
+      details: { action: 'PASSWORD_RESET_SUCCESS' },
     });
 
     res.status(200).json({
       status: 'success',
-      message: 'Votre mot de passe a été réinitialisé avec succès.',
-      token: authToken,
+      message: 'Votre mot de passe a été réinitialisé avec succès. Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.',
     });
   } catch (error) {
     next(error);

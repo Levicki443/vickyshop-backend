@@ -8,7 +8,7 @@ import {
   updatePassword,
   upgradeUserToSeller,
 } from '../controllers/authController.js';
-import { forgotPassword, resetPassword } from '../controllers/passwordResetController.js';
+import { forgotPassword, verifyResetToken, resetPassword } from '../controllers/passwordResetController.js';
 import { protect } from '../middlewares/authMiddleware.js';
 import {
   authLimiter,
@@ -25,6 +25,7 @@ router.post('/login', authLimiter, login);
 
 // Routes de réinitialisation sécurisée de mot de passe
 router.post('/forgot-password', passwordResetLimiter, forgotPassword);
+router.get('/verify-reset-token/:token', passwordResetLimiter, verifyResetToken);
 router.post('/reset-password', passwordResetLimiter, resetPassword);
 
 // Routes privées du profil utilisateur connecté
