@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Product } from '../models/Product.js';
+import { generateUniqueProductSlug } from '../utils/slugUtils.js';
 
 /**
  * Détecte si la requête provient d'un robot d'indexation ou d'un agent de prévisualisation sociale.
@@ -61,11 +62,21 @@ export const getProductSharePreview = async (req, res, next) => {
       return res.status(404).send('<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Produit introuvable | Vicky-Shop</title></head><body><h1>Ce produit est indisponible ou a été retiré.</h1></body></html>');
     }
 
+    // Auto-génération rétrocompatible du slug s'il n'était pas encore enregistré
+    if (!product.slug) {
+      try {
+        product.slug = await generateUniqueProductSlug(product.title, Product, product._id);
+        await product.save({ validateBeforeSave: false });
+      } catch (e) {
+        // En cas de conflit rare, on continue avec l'ID
+      }
+    }
+
     const frontendBaseUrl = (process.env.FRONTEND_URL || 'https://vickyshop.vercel.app').replace(/\/+$/, '');
     const canonicalSlug = product.slug || String(product._id);
     const canonicalUrl = `${frontendBaseUrl}/produit/${encodeURIComponent(canonicalSlug)}`;
 
-    // Si la requête provient d'un humain et non d'un bot crawler, redirection directe
+    // Si la requête provient d'un humain et non d'un bot crawler, redirection directe 302
     const userAgent = req.headers['user-agent'] || '';
     if (!isSocialCrawler(userAgent) && req.query.bot !== '1') {
       return res.redirect(302, canonicalUrl);
@@ -73,29 +84,35 @@ export const getProductSharePreview = async (req, res, next) => {
 
     const sellerName = product.seller?.shopName || product.seller?.name || product.sellerName || 'Vicky-Shop Officiel';
     const cleanTitle = escapeHtml(product.title);
+    const priceText = product.price ? `${Number(product.price).toLocaleString('fr-FR')} FCFA` : '';
     const cleanDesc = escapeHtml(
-      product.description
-        ? product.description.slice(0, 200)
-        : `Découvrez ${product.title} au prix de ${product.price.toLocaleString('fr-FR')} FCFA sur Vicky-Shop. Vendu par ${sellerName}.`
+      `Prix : ${priceText} | ${product.description ? product.description.slice(0, 180) : 'Découvrez cet article sur Vicky-Shop Côte d\'Ivoire.'} (Vendu par ${sellerName})`
     );
-    const imageUrl = product.image ? (product.image.startsWith('http') ? product.image : `${frontendBaseUrl}${product.image}`) : 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800';
+    const imageUrl = product.image
+      ? (product.image.startsWith('http') ? product.image : `${frontendBaseUrl}${product.image}`)
+      : 'https://res.cloudinary.com/l2wj9yzu/image/upload/v1790614748/vickyshop/products/products/aimfwyu6fenuxbipcpek.jpg';
 
     const html = `<!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" prefix="og: https://ogp.me/ns#">
 <head>
   <meta charset="UTF-8" />
   <title>${cleanTitle} | Vicky-Shop</title>
   <meta name="description" content="${cleanDesc}" />
   <link rel="canonical" href="${canonicalUrl}" />
 
-  <!-- Open Graph / Facebook / WhatsApp -->
-  <meta property="og:type" content="product" />
+  <!-- Open Graph Prioritaire WhatsApp / Facebook / LinkedIn -->
   <meta property="og:site_name" content="Vicky-Shop" />
+  <meta property="og:type" content="product" />
   <meta property="og:title" content="${cleanTitle}" />
   <meta property="og:description" content="${cleanDesc}" />
   <meta property="og:image" content="${escapeHtml(imageUrl)}" />
+  <meta property="og:image:secure_url" content="${escapeHtml(imageUrl)}" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="800" />
+  <meta property="og:image:height" content="800" />
   <meta property="og:image:alt" content="${cleanTitle}" />
   <meta property="og:url" content="${canonicalUrl}" />
+  <link rel="image_src" href="${escapeHtml(imageUrl)}" />
   <meta property="product:price:amount" content="${product.price}" />
   <meta property="product:price:currency" content="XOF" />
 
