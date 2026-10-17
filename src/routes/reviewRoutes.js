@@ -7,6 +7,7 @@ import {
   getApprovedReviews,
   createReview,
   getMyReviews,
+  checkReviewEligibility,
 } from '../controllers/reviewController.js';
 import {
   getAllReviewsAdmin,
@@ -45,7 +46,10 @@ const optionalAuth = async (req, res, next) => {
 // Récupérer les avis approuvés pour la boutique ou un produit
 router.get('/', getApprovedReviews);
 
-// Déposer un nouvel avis (Client authentifié ou invité avec commande)
+// Vérifier l'éligibilité d'évaluation d'un article (commande livrée requise)
+router.get('/eligibility/:productId', optionalAuth, checkReviewEligibility);
+
+// Déposer un nouvel avis (Client authentifié ou invité avec commande livrée)
 router.post('/', optionalAuth, createReview);
 
 // Consulter ses propres avis (Authentifié)

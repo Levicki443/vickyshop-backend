@@ -4,11 +4,9 @@ import { generateUniqueProductSlug } from '../utils/slugUtils.js';
 
 /**
  * Détecte si la requête provient d'un robot d'indexation ou d'un agent de prévisualisation sociale.
- * @param {string} userAgent - L'en-tête User-Agent HTTP.
- * @returns {boolean}
  */
 const isSocialCrawler = (userAgent = '') => {
-  const ua = userAgent.toLowerCase();
+  const ua = String(userAgent).toLowerCase();
   return (
     ua.includes('whatsapp') ||
     ua.includes('facebookexternalhit') ||
@@ -21,14 +19,14 @@ const isSocialCrawler = (userAgent = '') => {
     ua.includes('discordbot') ||
     ua.includes('applebot') ||
     ua.includes('googlebot') ||
-    ua.includes('bingbot')
+    ua.includes('bingbot') ||
+    ua.includes('yandex') ||
+    ua.includes('baiduspider')
   );
 };
 
 /**
  * Échappe les caractères HTML pour éviter toute injection dans les métadonnées.
- * @param {string} str - La chaîne à sécuriser.
- * @returns {string}
  */
 const escapeHtml = (str = '') => {
   return String(str)
@@ -78,7 +76,7 @@ export const getProductSharePreview = async (req, res, next) => {
 
     // Si la requête provient d'un humain et non d'un bot crawler, redirection directe 302
     const userAgent = req.headers['user-agent'] || '';
-    if (!isSocialCrawler(userAgent) && req.query.bot !== '1') {
+    if (!isSocialCrawler(userAgent) && req.query.bot !== '1' && req.query.preview !== '1') {
       return res.redirect(302, canonicalUrl);
     }
 
@@ -86,11 +84,10 @@ export const getProductSharePreview = async (req, res, next) => {
     const cleanTitle = escapeHtml(product.title);
     const priceText = product.price ? `${Number(product.price).toLocaleString('fr-FR')} FCFA` : '';
     const cleanDesc = escapeHtml(
-      `Prix : ${priceText} | ${product.description ? product.description.slice(0, 180) : 'Découvrez cet article sur Vicky-Shop Côte d\'Ivoire.'} (Vendu par ${sellerName})`
+      `Prix : ${priceText} | ${product.description ? product.description.slice(0, 160) : 'Commandez cet article sur Vicky-Shop.'} Vendu par ${sellerName}. Livraison rapide & paiement à la livraison.`
     );
-    const imageUrl = product.image
-      ? (product.image.startsWith('http') ? product.image : `${frontendBaseUrl}${product.image}`)
-      : 'https://res.cloudinary.com/l2wj9yzu/image/upload/v1790614748/vickyshop/products/products/aimfwyu6fenuxbipcpek.jpg';
+    const rawImage = product.image || 'https://res.cloudinary.com/l2wj9yzu/image/upload/v1790614748/vickyshop/products/products/aimfwyu6fenuxbipcpek.jpg';
+    const imageUrl = rawImage.startsWith('http') ? rawImage : `${frontendBaseUrl}${rawImage}`;
 
     const html = `<!DOCTYPE html>
 <html lang="fr" prefix="og: https://ogp.me/ns#">
@@ -100,7 +97,7 @@ export const getProductSharePreview = async (req, res, next) => {
   <meta name="description" content="${cleanDesc}" />
   <link rel="canonical" href="${canonicalUrl}" />
 
-  <!-- Open Graph Prioritaire WhatsApp / Facebook / LinkedIn -->
+  <!-- Open Graph Prioritaire WhatsApp / Facebook / LinkedIn / Telegram -->
   <meta property="og:site_name" content="Vicky-Shop" />
   <meta property="og:type" content="product" />
   <meta property="og:title" content="${cleanTitle}" />
@@ -108,12 +105,12 @@ export const getProductSharePreview = async (req, res, next) => {
   <meta property="og:image" content="${escapeHtml(imageUrl)}" />
   <meta property="og:image:secure_url" content="${escapeHtml(imageUrl)}" />
   <meta property="og:image:type" content="image/jpeg" />
-  <meta property="og:image:width" content="800" />
-  <meta property="og:image:height" content="800" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="${cleanTitle}" />
   <meta property="og:url" content="${canonicalUrl}" />
   <link rel="image_src" href="${escapeHtml(imageUrl)}" />
-  <meta property="product:price:amount" content="${product.price}" />
+  <meta property="product:price:amount" content="${product.price || 0}" />
   <meta property="product:price:currency" content="XOF" />
 
   <!-- Twitter / X Cards -->
@@ -121,13 +118,14 @@ export const getProductSharePreview = async (req, res, next) => {
   <meta name="twitter:title" content="${cleanTitle}" />
   <meta name="twitter:description" content="${cleanDesc}" />
   <meta name="twitter:image" content="${escapeHtml(imageUrl)}" />
+  <meta name="twitter:image:alt" content="${cleanTitle}" />
 
   <!-- Redirection instantanée de secours pour navigateurs humains -->
   <meta http-equiv="refresh" content="0;url=${canonicalUrl}" />
   <script>window.location.replace("${canonicalUrl}");</script>
 </head>
-<body style="font-family:sans-serif;background:#0c0f17;color:#f8fafc;padding:2rem;text-align:center;">
-  <h2>Redirection vers Vicky-Shop...</h2>
+<body style="font-family:system-ui,-apple-system,sans-serif;background:#0c0f17;color:#f8fafc;padding:2rem;text-align:center;">
+  <h2>Redirection vers ${cleanTitle}...</h2>
   <p><a href="${canonicalUrl}" style="color:#ff6b00;text-decoration:underline;">Cliquez ici si la redirection ne s'effectue pas automatiquement.</a></p>
 </body>
 </html>`;

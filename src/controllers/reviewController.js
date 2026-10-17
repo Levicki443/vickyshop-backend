@@ -5,7 +5,7 @@ import { sanitizeNoSqlValue } from '../middlewares/noSqlSanitizeMiddleware.js';
 
 /**
  * Contrôleur public et client pour les Témoignages et Avis clients.
- * Gère la consultation, l'ajout avec détection d'achat vérifié, et la protection anti-spam.
+ * Gère la consultation, l'ajout restreint aux commandes livrées, et l'éligibilité.
  */
 
 // 1. Récupérer les avis approuvés et actifs (Public)
@@ -54,7 +54,7 @@ export const getApprovedReviews = async (req, res, next) => {
   }
 };
 
-// 2. Créer un nouvel avis client (Avec vérification automatique de commande réelle)
+// 2. Créer un nouvel avis client (Strictement réservé aux clients ayant commandé ET reçu l'article)
 export const createReview = async (req, res, next) => {
   try {
     const {
@@ -66,7 +66,6 @@ export const createReview = async (req, res, next) => {
       orderNumber,
     } = req.body;
 
-    // Validation des données d'entrée
     const numRating = parseInt(rating, 10);
     if (!numRating || numRating < 1 || numRating > 5) {
       return res.status(400).json({
@@ -89,13 +88,9 @@ export const createReview = async (req, res, next) => {
       });
     }
 
-    // Détermination du nom du client (depuis la session ou le formulaire)
     let authorName = req.user ? req.user.name : (customerName || '').trim();
-    if (!authorName) {
-      authorName = 'Client Vérifié';
-    }
+    if (!authorName) authorName = 'Client Vérifié';
 
-    // Avatar par défaut si non spécifié
     let authorAvatar = (customerAvatar || '').trim();
     if (!authorAvatar && req.user?.avatar) {
       authorAvatar = req.user.avatar;
@@ -114,59 +109,57 @@ export const createReview = async (req, res, next) => {
       }
     }
 
-    // Vérification d'achat réel (Achat vérifié)
     let isVerifiedPurchase = false;
     let orderRef = null;
     let cleanOrderNumber = (orderNumber || '').trim().toUpperCase();
 
-    if (cleanOrderNumber) {
-      const order = await Order.findOne({ orderNumber: cleanOrderNumber });
-      if (order) {
-        orderRef = order._id;
-        // Vérification de validité de la commande
-        const isDeliveredOrValid = ['livree', 'en_livraison', 'confirmee', 'en_preparation'].includes(order.orderStatus);
-        if (isDeliveredOrValid) {
-          if (!productId) {
-            isVerifiedPurchase = true;
-          } else {
-            const hasPurchasedProduct = order.items.some(
-              (item) => String(item.productId) === String(productId) || item.title === productTitle
-            );
-            if (hasPurchasedProduct) {
-              isVerifiedPurchase = true;
-            }
-          }
-        }
-      }
-    } else if (req.user) {
-      // Vérifier si le client connecté a une commande livrée pour ce produit
-      const userOrders = await Order.find({
-        $or: [{ customerId: req.user._id }, { customerEmail: req.user.email }],
-      });
+    // RÈGLE STRICTE : Pour donner son avis sur un article, le client DOIT avoir commandé et REÇU l'article (statut: livree)
+    if (productId) {
+      let deliveredOrder = null;
 
-      if (userOrders.length > 0) {
-        if (!productId) {
-          isVerifiedPurchase = true;
-        } else {
-          const matchingOrder = userOrders.find((ord) =>
-            ord.items.some((item) => String(item.productId) === String(productId))
+      if (cleanOrderNumber) {
+        const order = await Order.findOne({ orderNumber: cleanOrderNumber });
+        if (order && order.orderStatus === 'livree') {
+          const hasItem = order.items.some(
+            (item) => String(item.productId) === String(productId) || item.title === productTitle
           );
-          if (matchingOrder) {
-            isVerifiedPurchase = true;
-            orderRef = matchingOrder._id;
-            cleanOrderNumber = matchingOrder.orderNumber;
-          }
+          if (hasItem) deliveredOrder = order;
         }
       }
+
+      if (!deliveredOrder && req.user) {
+        const userDeliveredOrders = await Order.find({
+          $or: [{ customerId: req.user._id }, { customerEmail: req.user.email }],
+          orderStatus: 'livree',
+        });
+
+        deliveredOrder = userDeliveredOrders.find((ord) =>
+          ord.items.some(
+            (item) => String(item.productId) === String(productId) || item.title === productTitle
+          )
+        );
+      }
+
+      if (!deliveredOrder) {
+        return res.status(403).json({
+          status: 'error',
+          message: 'Seuls les clients ayant commandé et reçu cet article (statut : Livrée) peuvent déposer un avis.',
+        });
+      }
+
+      isVerifiedPurchase = true;
+      orderRef = deliveredOrder._id;
+      cleanOrderNumber = deliveredOrder.orderNumber;
     }
 
-    // Protection anti-doublon (éviter de poster plusieurs fois le même avis)
+    // Protection anti-doublon
     const duplicateQuery = {
       comment: cleanComment,
       rating: numRating,
     };
     if (req.user) duplicateQuery.userId = req.user._id;
     if (cleanOrderNumber) duplicateQuery.orderNumber = cleanOrderNumber;
+    if (productRef) duplicateQuery.productId = productRef;
 
     const existingReview = await Review.findOne(duplicateQuery);
     if (existingReview) {
@@ -176,7 +169,6 @@ export const createReview = async (req, res, next) => {
       });
     }
 
-    // Création du témoignage en base de données
     const newReview = await Review.create({
       userId: req.user ? req.user._id : null,
       customerName: authorName,
@@ -189,7 +181,7 @@ export const createReview = async (req, res, next) => {
       orderId: orderRef,
       orderNumber: cleanOrderNumber,
       isVerifiedPurchase,
-      status: 'pending', // En attente de validation administrative (modération stricte)
+      status: 'pending',
       isActive: true,
     });
 
@@ -221,6 +213,81 @@ export const getMyReviews = async (req, res, next) => {
       status: 'success',
       data: {
         reviews,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 4. Vérifier l'éligibilité d'un client à évaluer un article (Achat réel + Livraison reçue obligatoire)
+export const checkReviewEligibility = async (req, res, next) => {
+  try {
+    const { productId } = req.params;
+    if (!productId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Identifiant du produit manquant.',
+      });
+    }
+
+    if (!req.user) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          eligible: false,
+          reason: 'unauthenticated',
+          message: 'Connectez-vous pour évaluer cet article si vous l\'avez commandé et reçu.',
+        },
+      });
+    }
+
+    const orders = await Order.find({
+      $or: [{ customerId: req.user._id }, { customerEmail: req.user.email }],
+      'items.productId': productId,
+    }).sort({ createdAt: -1 }).lean();
+
+    if (!orders || orders.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          eligible: false,
+          reason: 'not_ordered',
+          message: 'Seuls les clients ayant commandé et reçu cet article peuvent laisser un avis.',
+        },
+      });
+    }
+
+    const deliveredOrder = orders.find((ord) => ord.orderStatus === 'livree');
+    if (!deliveredOrder) {
+      const activeOrder = orders[0];
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          eligible: false,
+          reason: 'not_delivered',
+          orderNumber: activeOrder.orderNumber,
+          orderStatus: activeOrder.orderStatus,
+          message: `Votre commande #${activeOrder.orderNumber} n'a pas encore été livrée. Vous pourrez donner votre avis dès réception de votre colis !`,
+        },
+      });
+    }
+
+    const existingReview = await Review.findOne({
+      userId: req.user._id,
+      productId,
+    }).lean();
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        eligible: true,
+        reason: 'eligible',
+        alreadyReviewed: !!existingReview,
+        orderNumber: deliveredOrder.orderNumber,
+        message: existingReview
+          ? 'Vous avez déjà évalué cet article suite à votre livraison.'
+          : 'Achat vérifié et livré ! Vous pouvez déposer votre avis sur cet article.',
       },
     });
   } catch (error) {
