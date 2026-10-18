@@ -51,12 +51,15 @@ for (const input of safeInputs) {
   assertTest(`Autorisation légitime : "${input.substring(0, 40)}..."`, result.safe === true);
 }
 
-// 3. Test du Prompt Système
-const systemPrompt = await buildSystemInstruction('Kouassi');
+const systemPrompt = await buildSystemInstruction('Kouassi', 'vendeur', 'DONNÉES TEST');
 assertTest('Prompt système contient le nom client', systemPrompt.includes('Kouassi'));
 assertTest('Prompt système contient les frais de livraison', systemPrompt.includes('2 000 FCFA'));
 assertTest('Prompt système contient la mention Cash on Delivery', systemPrompt.includes('Paiement en espèces à la livraison'));
 assertTest('Prompt système contient les consignes anti-injection', systemPrompt.includes('DÉFENSE ANTI-REVERSE ENGINEERING'));
+assertTest('Prompt système intègre le lexique ivoirien', systemPrompt.includes('gbairai'));
+assertTest('Prompt système intègre le guide vendeurs', systemPrompt.includes('GUIDE D\'ACCOMPAGNEMENT DÉDIÉ AUX VENDEURS'));
+assertTest('Prompt système intègre le protocole des balises d\'action', systemPrompt.includes('[ACTION:TRACK_ORDER'));
+assertTest('Prompt système intègre le protocole WhatsApp Support', systemPrompt.includes('[ACTION:WHATSAPP_SUPPORT]'));
 
 console.log(`\n------------------------------------------------------`);
 console.log(`Résultats des tests IA : ${passed} réussis, ${failed} échoués`);

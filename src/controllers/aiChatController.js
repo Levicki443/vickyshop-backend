@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { ChatConversation } from '../models/ChatConversation.js';
 import { queryGeminiAssistant } from '../services/geminiService.js';
+import { resolveDynamicContext } from '../services/aiContextResolver.js';
 
 /**
  * Suggestions de questions prédéfinies pour amorcer immédiatement la discussion.
@@ -83,13 +84,22 @@ export const handleChatMessage = async (req, res, next) => {
       conversation?.userName ||
       'cher client';
 
+    const userRole = authUser?.role || 'visiteur';
     const historyMessages = conversation?.messages || [];
 
-    // Envoi à l'IA avec l'historique récent de la session
+    // Résolution contextuelle dynamique (recherche produit réelle, commandes personnelles)
+    const dynamicContext = await resolveDynamicContext({
+      message: cleanMessage,
+      user: authUser,
+    });
+
+    // Envoi à l'IA avec l'historique récent de la session et le contexte vérifié
     const aiResult = await queryGeminiAssistant({
       message: cleanMessage,
       conversationHistory: historyMessages,
       userName: resolvedUserName,
+      userRole,
+      dynamicContext,
       clientIp,
     });
 

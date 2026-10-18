@@ -36,29 +36,50 @@ export const checkInputSafety = (message) => {
 /**
  * Réponse experte locale de secours si aucune clé API Gemini n'est configurée ou si le quota est atteint.
  */
-const getFallbackResponse = (userMessage) => {
+const getFallbackResponse = (userMessage, dynamicContext = '', userRole = 'client') => {
   const lower = userMessage.toLowerCase();
 
-  if (lower.includes('livraison') || lower.includes('frais') || lower.includes('délai') || lower.includes('combien')) {
-    return 'Chez Vicky-Shop, la livraison standard à Abidjan est de **2 000 FCFA**, et elle est **totalement GRATUITE dès 50 000 FCFA** d\'achats ! Les délais sont de 24h à 48h ouvrées.';
+  if (lower.includes('commande') || lower.includes('suivi') || lower.includes('colis')) {
+    if (dynamicContext && dynamicContext.includes('CMD-')) {
+      return `Voici les informations vérifiées sur vos commandes récentes :\n${dynamicContext}\n\nVous pouvez cliquer sur le bouton ci-dessous pour ouvrir le suivi en direct.`;
+    }
+    return 'Pour suivre votre commande en direct, accédez à votre espace ou saisissez votre numéro de commande (ex: **CMD-123456**). Notre équipe vous livre en 24h à 48h ouvrées avec paiement en espèces à la livraison.';
   }
+
+  if (lower.includes('vendeur') || lower.includes('vendre') || lower.includes('boutique') || userRole === 'vendeur') {
+    return 'En tant que vendeur sur Vicky-Shop, vous disposez d\'un espace dédié pour publier vos articles, fixer vos prix en FCFA, gérer vos stocks et partager vos produits sur WhatsApp, TikTok et Facebook via vos liens de partage !\n\n[ACTION:SELLER_DASHBOARD]';
+  }
+
+  if (lower.includes('livraison') || lower.includes('frais') || lower.includes('délai') || lower.includes('combien')) {
+    return 'Chez Vicky-Shop, la livraison standard à Abidjan est de **2 000 FCFA**, et elle est **totalement GRATUITE dès 50 000 FCFA** d\'achats ! Les délais sont de 24h à 48h ouvrées sur toutes les communes (Cocody, Yopougon, Marcory, etc.).';
+  }
+
   if (lower.includes('paiement') || lower.includes('payer') || lower.includes('carte') || lower.includes('argent') || lower.includes('espèces')) {
     return 'Le paiement s\'effectue exclusivement **en espèces à la livraison (Cash on Delivery)**. Vous inspectez votre colis avant de régler directement le livreur en espèces.';
   }
-  if (lower.includes('vendeur') || lower.includes('vendre') || lower.includes('boutique')) {
-    return 'Vous pouvez devenir vendeur certifié sur Vicky-Shop ! Créez simplement un compte avec le rôle **Vendeur** pour accéder à votre espace de gestion et publier vos articles.';
-  }
-  if (lower.includes('retour') || lower.includes('échange') || lower.includes('taille') || lower.includes('remboursement')) {
-    return 'Vous pouvez inspecter votre article à la livraison. Si la taille ne convient pas ou en cas de défaut, un échange est possible sous 48h ouvrées avec l\'article neuf dans son emballage.';
+
+  if (lower.includes('aide') || lower.includes('humain') || lower.includes('problème') || lower.includes('réclamation') || lower.includes('litige')) {
+    return 'Notre service client humain est à votre entière écoute pour vous assister par WhatsApp au **+225 05 54 72 65 74**.\n\n[ACTION:WHATSAPP_SUPPORT]';
   }
 
-  return 'Bonjour ! Je suis Vicky IA, votre assistante shopping. Je suis à votre entière disposition pour vous guider sur nos collections, les tarifs de livraison (2 000 FCFA, gratuite dès 50 000 FCFA) et notre paiement en espèces à la livraison. Comment puis-je vous aider aujourd\'hui ?';
+  if (dynamicContext && dynamicContext.includes('ARTICLES RÉELS')) {
+    return `Voici les articles disponibles actuellement dans la boutique :\n${dynamicContext}\n\nN'hésitez pas à cliquer sur l'un d'eux pour voir la fiche détaillée !`;
+  }
+
+  return 'Bonjour ! Je suis Vicky IA, votre conseillère officielle Vicky-Shop. Je suis à votre entière disposition pour vous guider sur nos collections, le suivi de vos commandes, les tarifs de livraison (2 000 FCFA, gratuite dès 50 000 FCFA) ou votre compte vendeur. Comment puis-je vous aider aujourd\'hui ?';
 };
 
 /**
  * Envoie la conversation au modèle Google Gemini via l'API REST v1beta officielle.
  */
-export const queryGeminiAssistant = async ({ message, conversationHistory = [], userName = 'cher client', clientIp = '' }) => {
+export const queryGeminiAssistant = async ({
+  message,
+  conversationHistory = [],
+  userName = 'cher client',
+  userRole = 'client',
+  dynamicContext = '',
+  clientIp = '',
+}) => {
   // 1. Censure de sécurité préalable (Couche 1)
   const safetyCheck = checkInputSafety(message);
   if (!safetyCheck.safe) {
@@ -82,15 +103,14 @@ export const queryGeminiAssistant = async ({ message, conversationHistory = [], 
 
   // 2. Si la clé n'est pas encore renseignée, réponse de secours de haute qualité
   if (!apiKey) {
-    console.warn('[Gemini AI] Clé GEMINI_API_KEY non configurée dans .env. Utilisation de la réponse experte locale.');
     return {
-      reply: getFallbackResponse(message),
+      reply: getFallbackResponse(message, dynamicContext, userRole),
       isFallback: true,
     };
   }
 
   // 3. Construction des instructions système et du contexte historique
-  const systemInstructionText = await buildSystemInstruction(userName);
+  const systemInstructionText = await buildSystemInstruction(userName, userRole, dynamicContext);
 
   // Préparation de la fenêtre glissante de contexte (8 derniers échanges max)
   const formattedHistory = [];
