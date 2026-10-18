@@ -49,6 +49,73 @@ const userSchema = new mongoose.Schema(
       set: (val) => normalizeRole(val, ROLES.CLIENT),
       index: true,
     },
+    status: {
+      type: String,
+      enum: {
+        values: ['actif', 'suspendu', 'desactive'],
+        message: 'Le statut `{VALUE}` est invalide. Choix : actif, suspendu, desactive',
+      },
+      default: 'actif',
+      index: true,
+    },
+    avatar: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    isPhoneVerified: {
+      type: Boolean,
+      default: false,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+    suspensionReason: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [500, 'Le motif de suspension ne peut pas dépasser 500 caractères'],
+    },
+    adminNotes: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: [1000, 'Les notes administratives ne peuvent pas dépasser 1000 caractères'],
+    },
+    adminAuditLog: [
+      {
+        action: {
+          type: String,
+          required: true,
+        },
+        performedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          default: null,
+        },
+        performedByName: {
+          type: String,
+          default: 'Système',
+        },
+        date: {
+          type: Date,
+          default: Date.now,
+        },
+        reason: {
+          type: String,
+          default: '',
+        },
+        details: {
+          type: mongoose.Schema.Types.Mixed,
+          default: {},
+        },
+      },
+    ],
     address: {
       type: String,
       trim: true,

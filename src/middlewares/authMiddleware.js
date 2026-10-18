@@ -56,6 +56,40 @@ export const protect = async (req, res, next) => {
       });
     }
 
+    // Si le compte est suspendu par l'administration
+    if (currentUser.status === 'suspendu') {
+      securityLog.accessDenied({
+        userId: currentUser._id,
+        role: currentUser.role,
+        route: req.originalUrl,
+        method: req.method,
+        ip: clientIp,
+        reason: 'Compte suspendu',
+      });
+      return res.status(403).json({
+        status: 'error',
+        message: currentUser.suspensionReason
+          ? `Votre compte est suspendu : ${currentUser.suspensionReason}. Veuillez contacter le support.`
+          : 'Votre compte a été suspendu par l\'administration. Veuillez contacter le support.',
+      });
+    }
+
+    // Si le compte est désactivé
+    if (currentUser.status === 'desactive') {
+      securityLog.accessDenied({
+        userId: currentUser._id,
+        role: currentUser.role,
+        route: req.originalUrl,
+        method: req.method,
+        ip: clientIp,
+        reason: 'Compte désactivé',
+      });
+      return res.status(403).json({
+        status: 'error',
+        message: 'Ce compte utilisateur a été désactivé.',
+      });
+    }
+
     // Si c'est un compte vendeur suspendu
     if (isSellerRole(currentUser.role) && currentUser.isSellerActive === false) {
       return res.status(403).json({

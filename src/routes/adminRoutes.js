@@ -14,10 +14,17 @@ import {
   seedProductsAdmin,
 } from '../controllers/adminProductController.js';
 import {
-  getAllUsers,
   getShopSettings,
   updateShopSettings,
 } from '../controllers/adminSettingsController.js';
+import {
+  getUserStats,
+  getUsers,
+  getUserById,
+  updateUser,
+  updateUserStatus,
+  deleteUser,
+} from '../controllers/adminUserController.js';
 
 const router = express.Router();
 
@@ -43,8 +50,13 @@ router.put('/products/:id', updateProduct);
 router.delete('/products/:id', deleteProduct);
 router.patch('/products/:id/toggle-stock', toggleProductStock);
 
-// 5. Gestion des utilisateurs / clients
-router.get('/users', getAllUsers);
+// 5. Gestion avancée des utilisateurs & permissions
+router.get('/users/stats', getUserStats);
+router.get('/users', getUsers);
+router.get('/users/:id', getUserById);
+router.put('/users/:id', updateUser);
+router.patch('/users/:id/status', updateUserStatus);
+router.delete('/users/:id', deleteUser);
 
 // 6. Paramètres généraux de la boutique
 router.get('/settings', getShopSettings);

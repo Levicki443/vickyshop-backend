@@ -3,6 +3,7 @@ import { User } from '../models/User.js';
 import { config } from '../config/environment.js';
 import { ROLES, normalizeRole, isSellerRole, isAdminRole } from '../utils/roleUtils.js';
 import { securityLog } from '../utils/securityLogger.js';
+import { notifyAdmins } from '../config/socket.js';
 
 const generateToken = (id) => {
   return jwt.sign({ id }, config.jwt.secret, {
@@ -15,6 +16,11 @@ const formatUserResponse = (user) => ({
   name: user.name,
   email: user.email,
   phone: user.phone,
+  avatar: user.avatar || '',
+  status: user.status || 'actif',
+  isEmailVerified: !!user.isEmailVerified,
+  isPhoneVerified: !!user.isPhoneVerified,
+  lastLogin: user.lastLogin || null,
   address: user.address || '',
   city: user.city || 'Abidjan',
   role: normalizeRole(user.role),
@@ -70,6 +76,12 @@ export const register = async (req, res, next) => {
     const token = generateToken(newUser._id);
     securityLog.authSuccess({ userId: newUser._id, email: newUser.email, role: newUser.role, ip: clientIp });
 
+    try {
+      notifyAdmins('user:registered', formatUserResponse(newUser));
+    } catch {
+      // Ignorer les erreurs d'émission socket sans bloquer l'enregistrement
+    }
+
     res.status(201).json({
       status: 'success',
       message: isSeller ? 'Compte vendeur créé avec succès !' : 'Compte client créé avec succès !',
@@ -112,6 +124,12 @@ export const registerAdmin = async (req, res, next) => {
 
     const token = generateToken(newAdmin._id);
     securityLog.adminAction({ action: 'CREATION_COMPTE_ADMIN', targetResource: 'User', userId: newAdmin._id, ip: clientIp });
+
+    try {
+      notifyAdmins('user:registered', formatUserResponse(newAdmin));
+    } catch {
+      // Ignorer sans interrompre
+    }
 
     res.status(201).json({
       status: 'success',
@@ -160,14 +178,34 @@ export const login = async (req, res, next) => {
       return res.status(401).json({ status: 'error', message: 'Email ou mot de passe incorrect.' });
     }
 
-    // Réinitialisation des tentatives échouées après connexion réussie
-    user.failedLoginAttempts = 0;
-    user.lockUntil = null;
-    await user.save({ validateBeforeSave: false });
+    // Vérification du statut de compte suspendu ou désactivé
+    if (user.status === 'suspendu') {
+      securityLog.authFailure({ email, reason: 'Tentative compte suspendu', ip: clientIp });
+      return res.status(403).json({
+        status: 'error',
+        message: user.suspensionReason
+          ? `Votre compte a été suspendu : ${user.suspensionReason}. Contactez l'administration.`
+          : 'Votre compte a été suspendu par l\'administration. Veuillez contacter le support.',
+      });
+    }
+
+    if (user.status === 'desactive') {
+      securityLog.authFailure({ email, reason: 'Tentative compte désactivé', ip: clientIp });
+      return res.status(403).json({
+        status: 'error',
+        message: 'Ce compte utilisateur a été désactivé.',
+      });
+    }
 
     if (isSellerRole(user.role) && user.isSellerActive === false) {
       return res.status(403).json({ status: 'error', message: 'Votre compte vendeur a été temporairement suspendu.' });
     }
+
+    // Réinitialisation des tentatives échouées et actualisation de la dernière connexion
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+    user.lastLogin = new Date();
+    await user.save({ validateBeforeSave: false });
 
     const token = generateToken(user._id);
     securityLog.authSuccess({ userId: user._id, email: user.email, role: user.role, ip: clientIp });
