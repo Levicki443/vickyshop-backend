@@ -14,6 +14,7 @@ import adminRoutes from './routes/adminRoutes.js';
 import sellerRoutes from './routes/sellerRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
+import aiRoutes from './routes/aiRoutes.js';
 import { ShopSettings } from './models/ShopSettings.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -115,6 +116,7 @@ app.use('/api/seller', sellerRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Route publique pour les paramètres de la boutique
 app.get('/api/settings', async (req, res, next) => {

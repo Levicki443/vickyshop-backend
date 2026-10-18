@@ -74,4 +74,9 @@ export const config = {
     url: (process.env.CLOUDINARY_URL || '').trim(),
     folder: process.env.CLOUDINARY_FOLDER || 'vickyshop/products',
   },
+
+  gemini: {
+    apiKey: (process.env.GEMINI_API_KEY || '').trim(),
+    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  },
 };

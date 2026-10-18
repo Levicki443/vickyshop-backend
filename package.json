@@ -9,6 +9,7 @@
     "dev": "nodemon src/server.js",
     "seed": "node src/seeders/seedProducts.js",
     "test:security": "node src/tests/securityCheck.js",
+    "test:ai": "node src/tests/aiChatTest.js",
     "test": "node src/tests/securityCheck.js"
   },
   "keywords": [
