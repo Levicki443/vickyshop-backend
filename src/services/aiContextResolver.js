@@ -20,65 +20,79 @@ const PRODUCT_KEYWORDS = [
  * @param {Object} params
  * @param {string} params.message - Message formulé par l'utilisateur
  * @param {Object|null} params.user - Profil de l'utilisateur authentifié (req.user)
- * @returns {Promise<string>} Contexte textuel vérifié prêt à être injecté
+ * @returns {Promise<Object>} Contexte textuel et entités vérifiées
  */
 export const resolveDynamicContext = async ({ message, user = null }) => {
+  const emptyResult = {
+    rawText: '',
+    products: [],
+    orders: [],
+    isSellerAction: false,
+    toString() { return this.rawText; },
+  };
+
   if (mongoose.connection.readyState !== 1) {
-    return '';
+    return emptyResult;
   }
 
-  const lower = (message || '').toLowerCase();
+  const raw = message || '';
+  const lower = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const contextParts = [];
+  let userOrders = [];
+  let matchedProducts = [];
+
+  // Détection d'intention d'ajout de produit ou gestion vendeur
+  const isSellerAction =
+    /\b(ajouter|creer|publier|mettre en vente|enregistrer|inserer)\b/.test(lower) &&
+    /\b(produit|article|robe|chaussure|item|photo)\b/.test(lower);
+
+  // Détection d'intention explicite de guide d'achat / passer commande
+  const isOrderingGuide =
+    /\b(comment|passer|faire|effectuer|enregistrer|valider)\b/.test(lower) &&
+    /\b(commande|commander|achat|acheter)\b/.test(lower);
 
   try {
-    // 1. Détection et extraction des commandes du client connecté
-    const isOrderInquiry = lower.includes('commande') || lower.includes('suivi') || lower.includes('colis') || ORDER_REGEX.test(message);
+    // 1. Détection et extraction des commandes personnelles (si tracking ou code spécifique)
+    const isOrderTracking =
+      !isOrderingGuide &&
+      (ORDER_REGEX.test(raw) ||
+        /\b(suivi|suivre|statut|colis|ou en est|ou est)\b/.test(lower) ||
+        (lower.includes('commande') && user && user._id));
 
-    if (isOrderInquiry) {
-      if (user && user._id) {
-        const orderMatch = message.match(ORDER_REGEX);
-        let userOrders = [];
+    if (isOrderTracking && user && user._id) {
+      const orderMatch = raw.match(ORDER_REGEX);
 
-        if (orderMatch) {
-          const specificOrder = await Order.findOne({
-            customerId: user._id,
-            orderNumber: orderMatch[1].toUpperCase(),
-          }).select('orderNumber status totalAmount items createdAt deliveryAddress city').lean();
+      if (orderMatch) {
+        const specificOrder = await Order.findOne({
+          customerId: user._id,
+          orderNumber: orderMatch[1].toUpperCase(),
+        }).select('orderNumber status totalAmount items createdAt deliveryAddress city').lean();
 
-          if (specificOrder) userOrders = [specificOrder];
-        }
+        if (specificOrder) userOrders = [specificOrder];
+      }
 
-        if (userOrders.length === 0) {
-          userOrders = await Order.find({ customerId: user._id })
-            .sort({ createdAt: -1 })
-            .limit(3)
-            .select('orderNumber status totalAmount items createdAt deliveryAddress city')
-            .lean();
-        }
+      if (userOrders.length === 0) {
+        userOrders = await Order.find({ customerId: user._id })
+          .sort({ createdAt: -1 })
+          .limit(3)
+          .select('orderNumber status totalAmount items createdAt deliveryAddress city')
+          .lean();
+      }
 
-        if (userOrders.length > 0) {
-          contextParts.push(`
-DONNÉES RÉELLES DES COMMANDES DU CLIENT (${user.name || 'Connecté'}) :
-${userOrders.map((ord) => `- Commande N° ${ord.orderNumber} : Statut = "${ord.status}", Montant = ${ord.totalAmount?.toLocaleString('fr-FR')} FCFA, ${ord.items?.length || 0} article(s), Destination = ${ord.city} (${ord.deliveryAddress}). [Balise d'action à proposer : [ACTION:TRACK_ORDER:${ord.orderNumber}]]`).join('\n')}
-CONSIGNE COMMANDE : Utilise ces informations réelles pour informer le client avec précision et lui proposer le bouton d'action.`);
-        } else {
-          contextParts.push(`\nINFORMATIONS COMMANDES : Le client ${user.name} n'a aucune commande enregistrée pour le moment.`);
-        }
-      } else {
-        contextParts.push(`\nINFORMATIONS COMMANDES : L'utilisateur n'est pas connecté. Rappelle-lui poliment de se connecter ou de saisir son numéro de commande CMD-XXXXXX pour consulter son statut.`);
+      if (userOrders.length > 0) {
+        contextParts.push(`DONNÉES COMMANDES CLIENT (${user.name || 'Connecté'}) :\n` +
+          userOrders.map((ord) => `- Commande N° ${ord.orderNumber} : Statut = "${ord.status}", Montant = ${ord.totalAmount?.toLocaleString('fr-FR')} FCFA, Destination = ${ord.city} (${ord.deliveryAddress}). [ACTION:TRACK_ORDER:${ord.orderNumber}]`).join('\n')
+        );
       }
     }
 
-    // 2. Détection d'intention de recherche produit
+    // 2. Détection de recherche produit réelle (exclut les actions vendeurs d'ajout)
     const containsProductKeyword = PRODUCT_KEYWORDS.some((kw) => lower.includes(kw));
-    if (containsProductKeyword) {
-      // Extraction des termes signifiants pour la recherche
+    if (containsProductKeyword && !isSellerAction && !isOrderingGuide) {
       const cleanKeywords = lower
         .replace(/[^\w\s-]/gi, ' ')
         .split(/\s+/)
-        .filter((w) => w.length > 3 && !['quel', 'quels', 'quelle', 'quelles', 'sont', 'votre', 'vos', 'avez', 'combien', 'avoir'].includes(w));
-
-      let matchedProducts = [];
+        .filter((w) => w.length > 3 && !['quel', 'quels', 'quelle', 'quelles', 'sont', 'votre', 'vos', 'avez', 'combien', 'avoir', 'avec', 'pour'].includes(w));
 
       if (cleanKeywords.length > 0) {
         const queryRegex = new RegExp(cleanKeywords.join('|'), 'i');
@@ -91,7 +105,7 @@ CONSIGNE COMMANDE : Utilise ces informations réelles pour informer le client av
           .lean();
       }
 
-      if (matchedProducts.length === 0) {
+      if (matchedProducts.length === 0 && (lower.includes('stock') || lower.includes('catalogue') || lower.includes('produit'))) {
         matchedProducts = await Product.find({ inStock: true })
           .sort({ createdAt: -1 })
           .limit(4)
@@ -100,26 +114,29 @@ CONSIGNE COMMANDE : Utilise ces informations réelles pour informer le client av
       }
 
       if (matchedProducts.length > 0) {
-        contextParts.push(`
-ARTICLES RÉELS CORRESPONDANTS ACTUELLEMENT EN STOCK DANS VICKY-SHOP :
-${matchedProducts.map((p) => `- "${p.title}" | Catégorie : ${p.category} | Prix exact : ${p.price?.toLocaleString('fr-FR')} FCFA | Disponibilité : En stock (${p.stockQuantity} unités). [Balise d'action : [ACTION:VIEW_PRODUCT:${p.slug || p._id}]]`).join('\n')}
-CONSIGNE PRODUITS : Indique ces prix réels sans rien inventer. Propose la balise d'action [ACTION:VIEW_PRODUCT:identifiant] pour permettre au client d'ouvrir la fiche d'un clic.`);
+        contextParts.push(`ARTICLES EN STOCK DANS VICKY-SHOP :\n` +
+          matchedProducts.map((p) => `- "${p.title}" | Catégorie : ${p.category} | Prix : ${p.price?.toLocaleString('fr-FR')} FCFA | Stock : ${p.stockQuantity} [ACTION:VIEW_PRODUCT:${p.slug || p._id}]`).join('\n')
+        );
       }
     }
 
-    // 3. Contexte spécifique Vendeur
+    // 3. Contexte Vendeur connecté
     if (user && (user.role === 'vendeur' || user.role === 'admin')) {
       const sellerProductsCount = await Product.countDocuments({ seller: user._id });
-      contextParts.push(`
-PROFIL VENDEUR CONNECTÉ :
-- Nom : ${user.name}
-- Rôle : Vendeur partenaire officiel
-- Articles actifs dans sa boutique : ${sellerProductsCount}
-CONSIGNES VENDEUR : Guide-le sur son espace vendeur. Propose la balise d'action [ACTION:SELLER_DASHBOARD] pour accéder à sa gestion des produits, commandes et liens de partage WhatsApp/TikTok.`);
+      contextParts.push(`ESPACE VENDEUR (${user.name}) : ${sellerProductsCount} article(s) publié(s) en boutique. [ACTION:SELLER_DASHBOARD]`);
     }
   } catch (err) {
     console.warn('[aiContextResolver] Erreur non bloquante de résolution de contexte :', err.message);
   }
 
-  return contextParts.join('\n');
+  const rawText = contextParts.join('\n\n');
+  return {
+    rawText,
+    products: matchedProducts,
+    orders: userOrders,
+    isSellerAction,
+    toString() {
+      return this.rawText;
+    },
+  };
 };
