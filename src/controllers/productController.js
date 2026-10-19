@@ -21,7 +21,7 @@ export const getProducts = async (req, res, next) => {
       filter.title = { $regex: search, $options: 'i' };
     }
 
-    let query = Product.find(filter).populate('seller', 'name shopName isSellerActive');
+    let query = Product.find(filter).populate('seller', 'name shopName isSellerActive').lean();
 
     if (sort === 'price-asc') {
       query = query.sort({ price: 1 });
@@ -41,6 +41,7 @@ export const getProducts = async (req, res, next) => {
       Product.countDocuments(filter),
     ]);
 
+    res.set('Cache-Control', 'public, max-age=45, stale-while-revalidate=120');
     res.status(200).json({
       status: 'success',
       results: products.length,
@@ -73,7 +74,7 @@ export const getProductById = async (req, res, next) => {
       ? { $or: [{ _id: cleanIdentifier }, { slug: cleanIdentifier.toLowerCase() }], isArchived: { $ne: true } }
       : { slug: cleanIdentifier.toLowerCase(), isArchived: { $ne: true } };
 
-    const product = await Product.findOne(query).populate('seller', 'name shopName shopPhone isSellerActive');
+    const product = await Product.findOne(query).populate('seller', 'name shopName shopPhone isSellerActive').lean();
     if (!product) {
       return res.status(404).json({
         status: 'error',
@@ -81,6 +82,7 @@ export const getProductById = async (req, res, next) => {
       });
     }
 
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=180');
     res.status(200).json({
       status: 'success',
       data: { product },
@@ -96,8 +98,9 @@ export const getProductById = async (req, res, next) => {
 export const getMyProducts = async (req, res, next) => {
   try {
     const query = isAdminRole(req.user.role) ? { isArchived: { $ne: true } } : { seller: req.user._id, isArchived: { $ne: true } };
-    const products = await Product.find(query).sort({ createdAt: -1 });
+    const products = await Product.find(query).sort({ createdAt: -1 }).lean();
 
+    res.set('Cache-Control', 'no-store, private');
     res.status(200).json({
       status: 'success',
       results: products.length,
@@ -278,6 +281,7 @@ export const getSimilarProducts = async (req, res, next) => {
 
     const products = await findSimilarProducts(currentProduct, limit);
 
+    res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=300');
     res.status(200).json({
       status: 'success',
       results: products.length,

@@ -3,33 +3,20 @@ import { ChatConversation } from '../models/ChatConversation.js';
 import { queryGeminiAssistant } from '../services/geminiService.js';
 import { resolveDynamicContext } from '../services/aiContextResolver.js';
 
-/**
- * Suggestions de questions prédéfinies pour amorcer immédiatement la discussion.
- */
-export const DEFAULT_SUGGESTIONS = [
-  {
-    id: 'sug-1',
-    label: 'Livraison & Frais',
-    prompt: 'Quels sont vos tarifs et délais de livraison à Abidjan et à l\'intérieur ?',
-  },
-  {
-    id: 'sug-2',
-    label: 'Paiement à la livraison',
-    prompt: 'Comment fonctionne le paiement en espèces à la livraison (Cash on Delivery) ?',
-  },
-  {
-    id: 'sug-3',
-    label: 'Devenir Vendeur',
-    prompt: 'Comment puis-je m\'inscrire et vendre mes produits sur Vicky-Shop ?',
-  },
-  {
-    id: 'sug-4',
-    label: 'Échange & Tailles',
-    prompt: 'Que faire si la taille d\'un vêtement ou d\'une paire de chaussures ne me convient pas ?',
-  },
+export const CLIENT_SUGGESTIONS = [
+  { id: 'sug-1', label: 'Livraison & Frais', prompt: 'Quels sont vos tarifs et délais de livraison à Abidjan et à l\'intérieur ?' },
+  { id: 'sug-2', label: 'Paiement à la livraison', prompt: 'Comment fonctionne le paiement en espèces à la livraison (Cash on Delivery) ?' },
+  { id: 'sug-3', label: 'Comment commander', prompt: 'Comment passer une commande sur Vicky-Shop étape par étape ?' },
+  { id: 'sug-4', label: 'Échange & Tailles', prompt: 'Que faire si la taille d\'un vêtement ou d\'une paire de chaussures ne me convient pas ?' },
 ];
 
-// Cache mémoire temporaire pour continuité de service si MongoDB est indisponible
+export const SELLER_SUGGESTIONS = [
+  { id: 'sel-1', label: 'Ajouter un article', prompt: 'Comment puis-je ajouter un nouveau produit dans ma boutique vendeur ?' },
+  { id: 'sel-2', label: 'Gestion des commandes', prompt: 'Comment suivre et traiter les commandes reçues sur mon espace vendeur ?' },
+  { id: 'sel-3', label: 'Partage sur réseaux', prompt: 'Comment diffuser les liens de mes produits sur WhatsApp, Facebook et TikTok ?' },
+  { id: 'sel-4', label: 'Conseils de vente', prompt: 'Quelles sont les bonnes pratiques pour soigner mes photos et mes descriptions d\'articles ?' },
+];
+
 const memorySessionStore = new Map();
 
 /**
@@ -37,29 +24,20 @@ const memorySessionStore = new Map();
  */
 export const handleChatMessage = async (req, res, next) => {
   try {
-    const { sessionId, message, userName: clientProvidedName } = req.body;
+    const { sessionId, message, userName: clientProvidedName, recentlyViewedIds } = req.body;
     const clientIp = req.ip || req.connection.remoteAddress;
 
     if (!sessionId || typeof sessionId !== 'string') {
-      return res.status(400).json({
-        status: 'error',
-        message: 'L\'identifiant de session (sessionId) est requis.',
-      });
+      return res.status(400).json({ status: 'error', message: 'L\'identifiant de session est requis.' });
     }
 
     if (!message || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Le message ne peut pas être vide.',
-      });
+      return res.status(400).json({ status: 'error', message: 'Le message ne peut pas être vide.' });
     }
 
     const cleanMessage = message.trim();
     if (cleanMessage.length > 2000) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Le message dépasse la limite autorisée de 2000 caractères.',
-      });
+      return res.status(400).json({ status: 'error', message: 'Le message dépasse la limite de 2000 caractères.' });
     }
 
     const authUser = req.user;
@@ -78,22 +56,19 @@ export const handleChatMessage = async (req, res, next) => {
       conversation = memorySessionStore.get(sessionId);
     }
 
-    const resolvedUserName =
-      authUser?.name ||
-      clientProvidedName?.trim() ||
-      conversation?.userName ||
-      'cher client';
-
+    const resolvedUserName = authUser?.name || clientProvidedName?.trim() || conversation?.userName || 'cher client';
     const userRole = authUser?.role || 'visiteur';
     const historyMessages = conversation?.messages || [];
 
-    // Résolution contextuelle dynamique (recherche produit réelle, commandes personnelles)
+    // Résolution contextuelle multi-tours et détection d'intention
     const dynamicContext = await resolveDynamicContext({
       message: cleanMessage,
       user: authUser,
+      conversationHistory: historyMessages,
+      recentlyViewedIds: Array.isArray(recentlyViewedIds) ? recentlyViewedIds : [],
     });
 
-    // Envoi à l'IA avec l'historique récent de la session et le contexte vérifié
+    // Envoi au modèle Gemini (ou fallback expert local basé sur données réelles)
     const aiResult = await queryGeminiAssistant({
       message: cleanMessage,
       conversationHistory: historyMessages,
@@ -114,11 +89,13 @@ export const handleChatMessage = async (req, res, next) => {
     const assistantMessageEntry = {
       role: 'assistant',
       content: aiResult.reply,
+      products: aiResult.products || [],
+      actions: aiResult.actions || [],
       createdAt: now,
       isSafe: aiResult.isSafe !== false,
     };
 
-    // Sauvegarde persistante en base de données si disponible
+    // Sauvegarde en base de données si disponible
     if (isDbReady) {
       try {
         if (!conversation || !(conversation instanceof ChatConversation)) {
@@ -142,7 +119,6 @@ export const handleChatMessage = async (req, res, next) => {
       }
     }
 
-    // Sauvegarde en cache mémoire pour survie des sessions
     const updatedMemoryMessages = [...historyMessages, userMessageEntry, assistantMessageEntry];
     memorySessionStore.set(sessionId, {
       sessionId,
@@ -154,6 +130,8 @@ export const handleChatMessage = async (req, res, next) => {
       status: 'success',
       data: {
         reply: aiResult.reply,
+        products: aiResult.products || [],
+        actions: aiResult.actions || [],
         sessionId,
         isSafe: aiResult.isSafe !== false,
         isFallback: !!aiResult.isFallback,
@@ -171,12 +149,8 @@ export const handleChatMessage = async (req, res, next) => {
 export const getChatHistory = async (req, res, next) => {
   try {
     const { sessionId } = req.params;
-
     if (!sessionId) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Le sessionId est obligatoire.',
-      });
+      return res.status(400).json({ status: 'error', message: 'Le sessionId est obligatoire.' });
     }
 
     if (mongoose.connection.readyState === 1) {
@@ -212,12 +186,11 @@ export const getChatHistory = async (req, res, next) => {
 };
 
 /**
- * Réinitialise une session de discussion (Nouvelle discussion).
+ * Réinitialise une session de discussion.
  */
 export const resetChatSession = async (req, res, next) => {
   try {
     const { sessionId } = req.params;
-
     if (sessionId) {
       memorySessionStore.delete(sessionId);
       if (mongoose.connection.readyState === 1) {
@@ -239,13 +212,17 @@ export const resetChatSession = async (req, res, next) => {
 };
 
 /**
- * Fournit les suggestions de questions rapides prédéfinies.
+ * Fournit les suggestions de questions rapides adaptées au profil (Client vs Vendeur).
  */
 export const getSuggestions = async (req, res) => {
+  const role = req.query.role || req.user?.role;
+  const isSeller = role === 'vendeur';
+
   res.status(200).json({
     status: 'success',
     data: {
-      suggestions: DEFAULT_SUGGESTIONS,
+      suggestions: isSeller ? SELLER_SUGGESTIONS : CLIENT_SUGGESTIONS,
+      isSeller,
     },
   });
 };

@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 /**
  * Schéma Mongoose pour les sessions de discussion de l'Assistant IA (Vicky IA).
  * Enregistre les échanges, rattachés à un sessionId (visiteur) ou userId (client connecté).
+ * Inclut le support des cartes produits interactives et des balises d'action structurées.
  */
 const chatMessageSchema = new mongoose.Schema(
   {
@@ -16,6 +17,33 @@ const chatMessageSchema = new mongoose.Schema(
       required: true,
       trim: true,
       maxlength: [4000, 'Le message ne peut pas dépasser 4000 caractères'],
+    },
+    products: {
+      type: [
+        {
+          _id: { type: String },
+          title: { type: String },
+          price: { type: Number },
+          originalPrice: { type: Number, default: null },
+          image: { type: String },
+          category: { type: String },
+          slug: { type: String },
+          inStock: { type: Boolean, default: true },
+          stockQuantity: { type: Number, default: 0 },
+          badge: { type: String, default: null },
+        },
+      ],
+      default: [],
+    },
+    actions: {
+      type: [
+        {
+          type: { type: String },
+          param: { type: String, default: '' },
+          label: { type: String, default: '' },
+        },
+      ],
+      default: [],
     },
     createdAt: {
       type: Date,

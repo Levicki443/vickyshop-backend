@@ -1,77 +1,92 @@
 import mongoose from 'mongoose';
-import { Product } from '../models/Product.js';
 import { Order } from '../models/Order.js';
+import { Product } from '../models/Product.js';
+import {
+  classifyUserIntent,
+  ORDER_CODE_REGEX,
+  normalizeText,
+} from './aiIntentClassifier.js';
+import {
+  findCatalogProducts,
+  compareProducts,
+  formatProductSnapshot,
+} from './aiProductFinder.js';
 
 /**
- * Service modulaire de résolution contextuelle des données réelles de Vicky-Shop.
+ * Service central de résolution contextuelle des données réelles de Vicky-Shop.
  * Interroge MongoDB en lecture seule avec isolation stricte des droits (RBAC).
  */
 
-const ORDER_REGEX = /\b(CMD-[A-Z0-9]+)\b/i;
-const PRODUCT_KEYWORDS = [
-  'produit', 'article', 'robe', 'chaussure', 'pantalon', 'chemise', 'sac',
-  'montre', 't-shirt', 'veste', 'prix', 'combien', 'stock', 'disponible',
-  'acheter', 'catalogue', 'casque', 'téléphone', 'parfum', 'bijou'
-];
+/**
+ * Extrait le dernier sujet ou article mentionné dans l'historique récent de discussion.
+ */
+const extractLastSubjectFromHistory = (history = []) => {
+  if (!Array.isArray(history) || history.length === 0) return null;
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.role === 'assistant' && msg.content) {
+      const match = msg.content.match(/\*\*([^*]+)\*\*/);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+  }
+  return null;
+};
 
 /**
- * Extrait les données réelles et personnalisées pertinentes pour enrichir le prompt de l'IA.
- *
- * @param {Object} params
- * @param {string} params.message - Message formulé par l'utilisateur
- * @param {Object|null} params.user - Profil de l'utilisateur authentifié (req.user)
- * @returns {Promise<Object>} Contexte textuel et entités vérifiées
+ * Résout le contexte dynamique complet pour la demande en cours.
  */
-export const resolveDynamicContext = async ({ message, user = null }) => {
+export const resolveDynamicContext = async ({
+  message,
+  user = null,
+  conversationHistory = [],
+  recentlyViewedIds = [],
+}) => {
   const emptyResult = {
     rawText: '',
     products: [],
     orders: [],
+    intent: { type: 'GENERAL_INQUIRY' },
+    actions: [],
     isSellerAction: false,
-    toString() { return this.rawText; },
+    toString() {
+      return this.rawText;
+    },
   };
 
+  if (!message || typeof message !== 'string') return emptyResult;
+
+  const previousSubject = extractLastSubjectFromHistory(conversationHistory);
+  const intent = classifyUserIntent(message, previousSubject);
+  const contextParts = [];
+  const actions = [];
+  let matchedProducts = [];
+  let userOrders = [];
+
   if (mongoose.connection.readyState !== 1) {
-    return emptyResult;
+    return { ...emptyResult, intent };
   }
 
-  const raw = message || '';
-  const lower = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const contextParts = [];
-  let userOrders = [];
-  let matchedProducts = [];
-
-  // Détection d'intention d'ajout de produit ou gestion vendeur
-  const isSellerAction =
-    /\b(ajouter|creer|publier|mettre en vente|enregistrer|inserer)\b/.test(lower) &&
-    /\b(produit|article|robe|chaussure|item|photo)\b/.test(lower);
-
-  // Détection d'intention explicite de guide d'achat / passer commande
-  const isOrderingGuide =
-    /\b(comment|passer|faire|effectuer|enregistrer|valider)\b/.test(lower) &&
-    /\b(commande|commander|achat|acheter)\b/.test(lower);
-
   try {
-    // 1. Détection et extraction des commandes personnelles (si tracking ou code spécifique)
-    const isOrderTracking =
-      !isOrderingGuide &&
-      (ORDER_REGEX.test(raw) ||
-        /\b(suivi|suivre|statut|colis|ou en est|ou est)\b/.test(lower) ||
-        (lower.includes('commande') && user && user._id));
+    // 1. Suivi des commandes personnelles (Isolation stricte RBAC)
+    if (intent.type === 'ORDER_TRACKING' || (intent.type === 'SUPPORT_COMPLAINT' && user && user._id)) {
+      const orderMatch = message.match(ORDER_CODE_REGEX);
 
-    if (isOrderTracking && user && user._id) {
-      const orderMatch = raw.match(ORDER_REGEX);
-
-      if (orderMatch) {
+      if (orderMatch && user && user._id) {
         const specificOrder = await Order.findOne({
           customerId: user._id,
           orderNumber: orderMatch[1].toUpperCase(),
-        }).select('orderNumber status totalAmount items createdAt deliveryAddress city').lean();
+        })
+          .select('orderNumber status totalAmount items createdAt deliveryAddress city')
+          .lean();
 
         if (specificOrder) userOrders = [specificOrder];
       }
 
-      if (userOrders.length === 0) {
+      // Si aucune commande trouvée avec le code, récupérer les 3 dernières commandes de l'utilisateur connecté
+      if (userOrders.length === 0 && user && user._id) {
         userOrders = await Order.find({ customerId: user._id })
           .sort({ createdAt: -1 })
           .limit(3)
@@ -80,61 +95,108 @@ export const resolveDynamicContext = async ({ message, user = null }) => {
       }
 
       if (userOrders.length > 0) {
-        contextParts.push(`DONNÉES COMMANDES CLIENT (${user.name || 'Connecté'}) :\n` +
-          userOrders.map((ord) => `- Commande N° ${ord.orderNumber} : Statut = "${ord.status}", Montant = ${ord.totalAmount?.toLocaleString('fr-FR')} FCFA, Destination = ${ord.city} (${ord.deliveryAddress}). [ACTION:TRACK_ORDER:${ord.orderNumber}]`).join('\n')
+        contextParts.push(
+          `COMMANDES CLIENT CONFIRMÉES (${user.name || 'Client'}) :\n` +
+            userOrders
+              .map(
+                (ord) =>
+                  `• Commande N° ${ord.orderNumber} : Statut = "${ord.status}", Montant = ${ord.totalAmount?.toLocaleString('fr-FR')} FCFA, Destination = ${ord.city} (${ord.deliveryAddress}).`
+              )
+              .join('\n')
         );
+
+        userOrders.forEach((o) => {
+          actions.push({
+            type: 'TRACK_ORDER',
+            param: o.orderNumber,
+            label: `Suivre la commande ${o.orderNumber}`,
+          });
+        });
       }
     }
 
-    // 2. Détection de recherche produit réelle (exclut les actions vendeurs d'ajout)
-    const containsProductKeyword = PRODUCT_KEYWORDS.some((kw) => lower.includes(kw));
-    if (containsProductKeyword && !isSellerAction && !isOrderingGuide) {
-      const cleanKeywords = lower
-        .replace(/[^\w\s-]/gi, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 3 && !['quel', 'quels', 'quelle', 'quelles', 'sont', 'votre', 'vos', 'avez', 'combien', 'avoir', 'avec', 'pour'].includes(w));
+    // 2. Recherche et recommandation dans le catalogue réel
+    if (intent.type === 'PRODUCT_SEARCH' || intent.type === 'PRODUCT_COMPARE' || intent.isFollowUp) {
+      const effectiveQuery = intent.isFollowUp && previousSubject ? `${previousSubject} ${message}` : message;
 
-      if (cleanKeywords.length > 0) {
-        const queryRegex = new RegExp(cleanKeywords.join('|'), 'i');
-        matchedProducts = await Product.find({
-          inStock: true,
-          $or: [{ title: queryRegex }, { category: queryRegex }, { description: queryRegex }],
-        })
-          .select('title price category stockQuantity slug _id')
-          .limit(4)
-          .lean();
+      if (intent.type === 'PRODUCT_COMPARE') {
+        const terms = effectiveQuery
+          .replace(/[^\w\s-]/gi, ' ')
+          .split(/\s+/)
+          .filter((t) => t.length > 3);
+        matchedProducts = await compareProducts(terms);
+      } else {
+        matchedProducts = await findCatalogProducts({
+          query: effectiveQuery,
+          budget: intent.budget,
+          limit: 4,
+        });
       }
 
-      if (matchedProducts.length === 0 && (lower.includes('stock') || lower.includes('catalogue') || lower.includes('produit'))) {
-        matchedProducts = await Product.find({ inStock: true })
-          .sort({ createdAt: -1 })
-          .limit(4)
-          .select('title price category stockQuantity slug _id')
+      // Complément avec les articles récemment consultés si la recherche n'a rien donné
+      if (matchedProducts.length === 0 && Array.isArray(recentlyViewedIds) && recentlyViewedIds.length > 0) {
+        const viewedProducts = await Product.find({
+          _id: { $in: recentlyViewedIds.slice(0, 3) },
+          isActive: { $ne: false },
+        })
+          .select('title price originalPrice category image images stockQuantity inStock slug badge')
           .lean();
+        matchedProducts = viewedProducts.map(formatProductSnapshot);
       }
 
       if (matchedProducts.length > 0) {
-        contextParts.push(`ARTICLES EN STOCK DANS VICKY-SHOP :\n` +
-          matchedProducts.map((p) => `- "${p.title}" | Catégorie : ${p.category} | Prix : ${p.price?.toLocaleString('fr-FR')} FCFA | Stock : ${p.stockQuantity} [ACTION:VIEW_PRODUCT:${p.slug || p._id}]`).join('\n')
+        contextParts.push(
+          `ARTICLES DISPONIBLES DANS LE CATALOGUE VICKY-SHOP :\n` +
+            matchedProducts
+              .map(
+                (p) =>
+                  `• "${p.title}" | Catégorie : ${p.category} | Prix : ${p.price?.toLocaleString('fr-FR')} FCFA | Disponibilité : ${p.inStock ? `${p.stockQuantity} en stock` : 'En rupture'}`
+              )
+              .join('\n')
         );
+
+        matchedProducts.forEach((p) => {
+          actions.push({
+            type: 'VIEW_PRODUCT',
+            param: p.slug || p._id,
+            label: `Voir ${p.title}`,
+          });
+        });
       }
     }
 
-    // 3. Contexte Vendeur connecté
+    // 3. Espace Vendeur connecté
     if (user && (user.role === 'vendeur' || user.role === 'admin')) {
-      const sellerProductsCount = await Product.countDocuments({ seller: user._id });
-      contextParts.push(`ESPACE VENDEUR (${user.name}) : ${sellerProductsCount} article(s) publié(s) en boutique. [ACTION:SELLER_DASHBOARD]`);
+      const sellerProductCount = await Product.countDocuments({ seller: user._id });
+      contextParts.push(`ESPACE VENDEUR DE L'UTILISATEUR (${user.name}) : ${sellerProductCount} article(s) publié(s).`);
+      actions.push({
+        type: 'SELLER_DASHBOARD',
+        param: '',
+        label: 'Ouvrir mon Espace Vendeur',
+      });
+    }
+
+    // 4. Action de support WhatsApp pour les réclamations
+    if (intent.type === 'SUPPORT_COMPLAINT' || intent.type === 'EXCHANGE_RETURN') {
+      actions.push({
+        type: 'WHATSAPP_SUPPORT',
+        param: '+2250554726574',
+        label: 'Contacter le support WhatsApp (+225)',
+      });
     }
   } catch (err) {
-    console.warn('[aiContextResolver] Erreur non bloquante de résolution de contexte :', err.message);
+    console.warn('[aiContextResolver] Erreur non bloquante de résolution :', err.message);
   }
 
   const rawText = contextParts.join('\n\n');
+
   return {
     rawText,
     products: matchedProducts,
     orders: userOrders,
-    isSellerAction,
+    intent,
+    actions,
+    isSellerAction: intent.type === 'SELLER_GUIDE',
     toString() {
       return this.rawText;
     },

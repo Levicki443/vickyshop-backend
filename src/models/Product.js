@@ -177,7 +177,6 @@ productSchema.pre('save', async function (next) {
 });
 
 // Indexation optimisée
-productSchema.index({ slug: 1 }, { unique: true, sparse: true });
 productSchema.index({ seller: 1, isArchived: 1, createdAt: -1 });
 productSchema.index({ category: 1, price: 1, inStock: 1, isActive: 1 });
 productSchema.index({ title: 'text', description: 'text', reference: 'text', brand: 'text' });

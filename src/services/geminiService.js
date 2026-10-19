@@ -35,6 +35,7 @@ export const checkInputSafety = (message) => {
 
 /**
  * Réponse experte locale de haute qualité en cas d'absence temporaire de clé Gemini ou quota.
+ * Utilise les données réelles extraites de MongoDB.
  */
 export const getFallbackResponse = (userMessage, dynamicContext = null, userRole = 'client') => {
   const clean = (userMessage || '').trim();
@@ -42,30 +43,31 @@ export const getFallbackResponse = (userMessage, dynamicContext = null, userRole
 
   const products = Array.isArray(dynamicContext?.products) ? dynamicContext.products : [];
   const orders = Array.isArray(dynamicContext?.orders) ? dynamicContext.orders : [];
+  const intentType = dynamicContext?.intent?.type;
 
-  // 1. Intention : Ajouter un article / Gestion Espace Vendeur
-  const isSellerAdding =
-    /\b(ajouter|creer|publier|mettre en vente|enregistrer|inserer)\b/.test(lower) &&
-    /\b(article|produit|robe|chaussure|item|photo|catalogue)\b/.test(lower);
+  // 1. Réclamation / Litige / Problème
+  if (intentType === 'SUPPORT_COMPLAINT' || /\b(drap|litige|probleme|reclamation|plainte|arnaque)\b/.test(lower)) {
+    return 'Je comprends tout à fait votre situation et nous prenons votre préoccupation très au sérieux.\n\n' +
+      'Pour résoudre cela dans les plus brefs délais :\n' +
+      '• Munissez-vous de votre numéro de commande (ex: **CMD-XXXXXX**).\n' +
+      '• Notre équipe du service client examine votre dossier sans délai.\n' +
+      '• Cliquez sur le bouton ci-dessous pour ouvrir directement la discussion avec notre responsable support sur WhatsApp :\n\n' +
+      '[ACTION:WHATSAPP_SUPPORT]';
+  }
 
-  const isSellerGeneral =
-    isSellerAdding ||
-    /\b(vendre|vendeur|boutique|djandjou|fournisseur)\b/.test(lower) ||
-    (userRole === 'vendeur' && (lower.includes('espace') || lower.includes('produit')));
-
-  if (isSellerGeneral) {
-    return 'Pour ajouter un article et vendre sur Vicky-Shop, suivez ces étapes simples :\n\n' +
-      '1️⃣ **Connexion Vendeur** : Connectez-vous avec votre compte vendeur (ou inscrivez-vous en choisissant le profil « Vendeur »).\n' +
-      '2️⃣ **Accédez à l\'Espace Vendeur** : Cliquez sur « Espace Vendeur » dans le menu ou utilisez le bouton ci-dessous.\n' +
+  // 2. Intention : Gestion Espace Vendeur
+  if (intentType === 'SELLER_GUIDE' || /\b(vendre|vendeur|boutique|djandjou|fournisseur)\b/.test(lower) || (userRole === 'vendeur' && lower.includes('produit'))) {
+    return 'Pour vendre et ajouter un article sur Vicky-Shop, voici les étapes à suivre :\n\n' +
+      '1️⃣ **Connexion Vendeur** : Connectez-vous avec votre compte vendeur.\n' +
+      '2️⃣ **Accédez à l\'Espace Vendeur** : Cliquez sur « Espace Vendeur » ou utilisez le bouton ci-dessous.\n' +
       '3️⃣ **Ajouter un produit** : Dans l\'onglet « Produits », cliquez sur le bouton **« + Ajouter un produit »**.\n' +
-      '4️⃣ **Renseignez la fiche** : Indiquez le titre, la catégorie, le prix en FCFA, la quantité en stock, la description et importez de belles photos nettes.\n' +
-      '5️⃣ **Publication & Partage** : Cliquez sur « Enregistrer ». Votre produit est instantanément en ligne et vous bénéficiez d\'un bouton de partage direct pour WhatsApp, TikTok et Facebook !\n\n' +
+      '4️⃣ **Renseignez la fiche** : Titre clair, catégorie, prix en FCFA, stock disponible, description et photos nettes.\n' +
+      '5️⃣ **Publication & Partage** : Cliquez sur « Enregistrer ». Votre produit est immédiatement visible en boutique avec un lien de partage pour WhatsApp, TikTok et Facebook !\n\n' +
       '[ACTION:SELLER_DASHBOARD]';
   }
 
-  // 2. Intention : Paiement & Modalités de règlement (prioritaire sur les questions de commande)
-  const isPayment = /\b(paiement|payer|carte|especes|cash|argent|regler|orange money|wave|moov|mtn)\b/.test(lower);
-  if (isPayment) {
+  // 3. Intention : Modalités de paiement
+  if (intentType === 'PAYMENT_INFO' || /\b(paiement|payer|especes|cash|argent|regler|orange money|wave|moov|mtn)\b/.test(lower)) {
     return 'Sur Vicky-Shop, le mode de règlement est le **Paiement en espèces à la livraison (Cash on Delivery)** :\n\n' +
       '• Vous ne payez **rien à l\'avance** sur le site.\n' +
       '• Le livreur vous remet votre colis à l\'adresse convenue.\n' +
@@ -74,48 +76,41 @@ export const getFallbackResponse = (userMessage, dynamicContext = null, userRole
       'C\'est la garantie d\'un achat 100 % sécurisé et sans mauvaise surprise !';
   }
 
-  // 3. Intention : Comment passer une commande / Comment acheter
-  const isOrderingGuide =
-    /\b(passer|faire|comment|effectuer|enregistrer|valider)\b/.test(lower) &&
-    /\b(commande|commander|achat|acheter)\b/.test(lower);
-
-  if (isOrderingGuide || lower.includes('comment acheter') || lower.includes('comment commander')) {
+  // 4. Intention : Passer commande / Comment acheter
+  if (intentType === 'ORDER_GUIDE' || (/\b(comment|passer|faire|effectuer|valider)\b/.test(lower) && /\b(commande|commander|achat|acheter)\b/.test(lower))) {
     return 'Passer commande sur Vicky-Shop est très simple, rapide et 100 % sécurisé :\n\n' +
       '1️⃣ **Sélectionnez vos articles** : Parcourez notre catalogue et choisissez vos coups de cœur (taille, couleur, quantité).\n' +
-      '2️⃣ **Ajoutez au panier** : Cliquez sur le bouton « Ajouter au panier », puis ouvrez votre panier en haut de l\'écran pour vérifier vos articles.\n' +
-      '3️⃣ **Validez votre livraison** : Cliquez sur « Commander » et renseignez vos coordonnées (nom, numéro de téléphone joignable et commune/quartier à Abidjan). **Aucune carte bancaire n\'est demandée !**\n' +
-      '4️⃣ **Paiement à la livraison** : Notre livreur vous contacte en 24h à 48h ouvrées. Vous vérifiez votre colis avant de régler directement en **espèces (Cash on Delivery)**.\n\n' +
-      'Avez-vous besoin d\'aide pour trouver un article en particulier ?';
+      '2️⃣ **Ajoutez au panier** : Cliquez sur « Ajouter au panier », puis ouvrez votre panier pour vérifier vos articles.\n' +
+      '3️⃣ **Validez votre livraison** : Renseignez vos coordonnées (nom, numéro de téléphone joignable et commune à Abidjan). **Aucune carte bancaire n\'est demandée !**\n' +
+      '4️⃣ **Paiement à la livraison** : Notre livreur vous contacte sous 24h à 48h ouvrées. Vous vérifiez votre colis avant de régler en **espèces (Cash on Delivery)**.\n\n' +
+      'Avez-vous besoin d\'aide pour trouver un article particulier ?';
   }
 
-  // 4. Intention : Suivi de commande / Où est mon colis
-  const hasOrderCode = /\b(CMD-[A-Z0-9]+)\b/i.test(clean);
-  const isTracking = hasOrderCode || /\b(suivre|suivi|statut|colis|arrive quand|ou est)\b/.test(lower);
-
-  if (isTracking || orders.length > 0) {
+  // 5. Intention : Suivi de commande
+  if (intentType === 'ORDER_TRACKING' || orders.length > 0 || /\b(CMD-[A-Z0-9]+)\b/i.test(clean)) {
     if (orders.length > 0) {
       const orderList = orders.map((o) =>
         `• **Commande N° ${o.orderNumber}** : Statut = "${o.status}", Montant = ${o.totalAmount?.toLocaleString('fr-FR')} FCFA\n[ACTION:TRACK_ORDER:${o.orderNumber}]`
       ).join('\n\n');
-      return `Voici les informations vérifiées sur vos commandes récentes :\n\n${orderList}\n\nVous pouvez cliquer sur le bouton ci-dessus pour ouvrir le suivi en direct.`;
+      return `Voici les informations vérifiées sur vos commandes récentes :\n\n${orderList}\n\nCliquez sur le bouton ci-dessus pour ouvrir le suivi en direct.`;
     }
     return 'Pour suivre votre commande en direct :\n' +
-      '• Si vous êtes connecté, accédez à votre rubrique « Mes Commandes ».\n' +
+      '• Si vous êtes connecté, consultez votre rubrique « Mes Commandes ».\n' +
       '• Ou envoyez-moi directement votre numéro de commande (ex: **CMD-123456**).\n\n' +
       'Nos livreurs assurent la livraison en 24h à 48h ouvrées sur tout Abidjan avec règlement en espèces à la livraison.';
   }
 
-  // 5. Intention : Frais, Délais et Modalités de Livraison
-  if (/\b(livraison|frais|delai|combien la livraison|expedition|vous livrez|abidjan|yopougon|cocody|koumassi|marcory|plateau|bouake|interieur)\b/.test(lower)) {
+  // 6. Intention : Frais & Délais de livraison
+  if (intentType === 'DELIVERY_INFO' || /\b(livraison|frais|delai|combien la livraison|expedition|abidjan|yopougon|cocody|marcory)\b/.test(lower)) {
     return 'Voici notre politique de livraison claire et transparente sur Vicky-Shop :\n\n' +
-      '🚚 **Tarif standard à Abidjan** : **2 000 FCFA** seulement sur toutes les communes (Cocody, Yopougon, Marcory, Plateau, Koumassi, Treichville, Port-Bouët, Adjamé, Abobo, Bingerville...).\n' +
+      '🚚 **Tarif standard à Abidjan** : **2 000 FCFA** seulement sur toutes les communes (Cocody, Yopougon, Marcory, Plateau, Koumassi, Treichville, Port-Bouët, Adjamé, Abobo...).\n' +
       '🎁 **Livraison GRATUITE** : Offerte automatiquement dès **50 000 FCFA** d\'achats dans votre panier !\n' +
       '⏱️ **Délais** : 24h à 48h ouvrées à Abidjan (et 48h à 72h vers l\'intérieur du pays).\n' +
       '📦 **Paiement** : Exclusivement en espèces au livreur après contrôle de votre colis.';
   }
 
-  // 6. Intention : Échange, Tailles, Essayage et Retours
-  if (/\b(echange|echanger|taille|pointure|retour|retourner|essayer|essayage|rembourser|remboursement)\b/.test(lower)) {
+  // 7. Intention : Échanges et retours
+  if (intentType === 'EXCHANGE_RETURN' || /\b(echange|echanger|taille|pointure|retour|retourner|essayage|remboursement)\b/.test(lower)) {
     return 'Chez Vicky-Shop, votre satisfaction est garantie :\n\n' +
       '✨ **Contrôle à la livraison** : Vous inspectez immédiatement le produit dès la remise par le livreur.\n' +
       '🔄 **Échange sous 48h** : Si la taille d\'un vêtement ou d\'une chaussure ne convient pas, nous réalisons un échange sous **48 heures ouvrées** (l\'article doit rester neuf dans son emballage avec ses étiquettes).\n' +
@@ -123,29 +118,29 @@ export const getFallbackResponse = (userMessage, dynamicContext = null, userRole
       '[ACTION:WHATSAPP_SUPPORT]';
   }
 
-  // 7. Intention : Articles en stock / Catalogue disponible
+  // 8. Intention : Articles en stock dans le catalogue
   if (products.length > 0) {
     const list = products.map((p) =>
-      `• **${p.title}** (${p.category}) — **${p.price?.toLocaleString('fr-FR')} FCFA**\n[ACTION:VIEW_PRODUCT:${p.slug || p._id}]`
+      `• **${p.title}** (${p.category}) — **${p.price?.toLocaleString('fr-FR')} FCFA**${p.inStock ? ` (Stock : ${p.stockQuantity})` : ' (En rupture)'}\n[ACTION:VIEW_PRODUCT:${p.slug || p._id}]`
     ).join('\n\n');
-    return `Voici des articles disponibles actuellement dans la boutique :\n\n${list}\n\nN'hésitez pas à cliquer sur l'un d'eux pour ouvrir sa fiche détaillée ou l'ajouter à votre panier !`;
+    return `Voici des articles disponibles actuellement dans la boutique :\n\n${list}\n\nVous pouvez cliquer sur une fiche pour l'examiner ou l'ajouter directement à votre panier !`;
   }
 
-  // 8. Intention : Assistance humaine / Service Client / Réclamation
-  if (/\b(aide|humain|contact|numero|telephone|whatsapp|service client|probleme|reclamation|litige|plainte|ya drap)\b/.test(lower)) {
-    return 'Notre service client officiel Vicky-Shop est à votre entière écoute :\n\n' +
-      '📱 **Assistance WhatsApp** : **+225 05 54 72 65 74**\n' +
-      '🕒 Disponible du lundi au samedi pour vous guider dans vos achats, vos livraisons ou la gestion de votre boutique.\n\n' +
-      '[ACTION:WHATSAPP_SUPPORT]';
+  // 9. Intention : Création de compte / Connexion
+  if (intentType === 'ACCOUNT_INFO' || /\b(creer un compte|inscription|inscrire|connexion)\b/.test(lower)) {
+    return 'Pour créer un compte ou vous connecter sur Vicky-Shop :\n\n' +
+      '• Cliquez sur le bouton « Connexion » en haut de page.\n' +
+      '• Vous pouvez choisir entre un profil **Client** (pour commander et suivre vos achats) ou **Vendeur** (pour publier votre propre catalogue).\n\n' +
+      '[ACTION:AUTH_MODAL]';
   }
 
-  // 9. Salutations ou question générale
+  // 10. Salutation générale
   return 'Bonjour ! Je suis Vicky IA, votre conseillère officielle Vicky-Shop.\n\n' +
     'Je suis à votre entière disposition 24h/24 pour vous guider :\n' +
-    '• Vous aider à trouver des articles tendance (vêtements, chaussures, accessoires)\n' +
+    '• Trouver des articles tendance selon vos goûts et votre budget en FCFA\n' +
     '• Vous guider pour passer commande avec paiement en espèces à la livraison\n' +
-    '• Vous renseigner sur la livraison (2 000 FCFA à Abidjan, gratuite dès 50 000 FCFA)\n' +
-    '• Vous accompagner pour vendre et ajouter des articles sur votre espace vendeur\n\n' +
+    '• Suivre vos commandes existantes\n' +
+    '• Vous accompagner pour vendre sur votre espace vendeur\n\n' +
     'Comment puis-je vous aider aujourd\'hui ?';
 };
 
@@ -160,7 +155,6 @@ export const queryGeminiAssistant = async ({
   dynamicContext = null,
   clientIp = '',
 }) => {
-  // 1. Censure de sécurité préalable (Couche 1)
   const safetyCheck = checkInputSafety(message);
   if (!safetyCheck.safe) {
     securityLog.accessDenied({
@@ -174,26 +168,30 @@ export const queryGeminiAssistant = async ({
 
     return {
       reply: 'Désolé, je ne peux pas répondre à cette demande. En tant que conseiller officiel de Vicky-Shop, je réponds exclusivement aux questions concernant la boutique, nos produits et nos services de livraison.',
+      products: [],
+      actions: [],
       isSafe: false,
     };
   }
 
   const apiKey = config.gemini.apiKey;
   const model = config.gemini.model || 'gemini-1.5-flash';
+  const products = Array.isArray(dynamicContext?.products) ? dynamicContext.products : [];
+  const actions = Array.isArray(dynamicContext?.actions) ? dynamicContext.actions : [];
 
-  // 2. Si la clé n'est pas encore renseignée, réponse de secours de haute qualité
   if (!apiKey) {
     return {
       reply: getFallbackResponse(message, dynamicContext, userRole),
+      products,
+      actions,
       isFallback: true,
+      isSafe: true,
     };
   }
 
-  // 3. Construction des instructions système et du contexte historique
   const contextString = dynamicContext ? (dynamicContext.rawText || dynamicContext.toString()) : '';
   const systemInstructionText = await buildSystemInstruction(userName, userRole, contextString);
 
-  // Préparation de la fenêtre glissante de contexte (8 derniers échanges max)
   const formattedHistory = [];
   const recentHistory = conversationHistory.slice(-8);
 
@@ -206,19 +204,14 @@ export const queryGeminiAssistant = async ({
     }
   }
 
-  // Ajout du message actuel
   formattedHistory.push({
     role: 'user',
     parts: [{ text: message }],
   });
 
-  // 4. Appel à l'API Google Gemini
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
   const requestBody = {
-    systemInstruction: {
-      parts: [{ text: systemInstructionText }],
-    },
+    systemInstruction: { parts: [{ text: systemInstructionText }] },
     contents: formattedHistory,
     safetySettings: [
       { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_LOW_AND_ABOVE' },
@@ -227,9 +220,9 @@ export const queryGeminiAssistant = async ({
       { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_LOW_AND_ABOVE' },
     ],
     generationConfig: {
-      temperature: 0.7,
+      temperature: 0.6,
       topP: 0.95,
-      maxOutputTokens: 800,
+      maxOutputTokens: 850,
     },
   };
 
@@ -241,12 +234,14 @@ export const queryGeminiAssistant = async ({
     });
 
     const data = await response.json();
-
     if (!response.ok) {
-      console.error('[Gemini API] Erreur retournée par Google :', data.error?.message || response.statusText);
+      console.error('[Gemini API] Erreur retournée :', data.error?.message || response.statusText);
       return {
         reply: getFallbackResponse(message, dynamicContext, userRole),
+        products,
+        actions,
         isFallback: true,
+        isSafe: true,
       };
     }
 
@@ -254,6 +249,8 @@ export const queryGeminiAssistant = async ({
     if (candidate?.finishReason === 'SAFETY') {
       return {
         reply: 'Votre message a été filtré par nos règles de sécurité. Je vous invite à me poser une question concernant la boutique Vicky-Shop.',
+        products: [],
+        actions: [],
         isSafe: false,
       };
     }
@@ -262,19 +259,27 @@ export const queryGeminiAssistant = async ({
     if (!replyText) {
       return {
         reply: getFallbackResponse(message, dynamicContext, userRole),
+        products,
+        actions,
         isFallback: true,
+        isSafe: true,
       };
     }
 
     return {
       reply: replyText.trim(),
+      products,
+      actions,
       isSafe: true,
     };
   } catch (error) {
     console.error('[Gemini API] Erreur réseau / fetch :', error.message);
     return {
       reply: getFallbackResponse(message, dynamicContext, userRole),
+      products,
+      actions,
       isFallback: true,
+      isSafe: true,
     };
   }
 };

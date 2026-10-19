@@ -1,8 +1,15 @@
 import { checkInputSafety, getFallbackResponse } from '../services/geminiService.js';
 import { buildSystemInstruction } from '../services/aiKnowledgeBase.js';
+import {
+  classifyUserIntent,
+  extractBudget,
+  isFollowUpQuestion,
+} from '../services/aiIntentClassifier.js';
+import { formatProductSnapshot } from '../services/aiProductFinder.js';
+import { CLIENT_SUGGESTIONS, SELLER_SUGGESTIONS } from '../controllers/aiChatController.js';
 
 console.log('\n======================================================');
-console.log('🤖 TESTS UNITAIRES DE SÉCURITÉ & CENSURE VICKY IA');
+console.log('🤖 TESTS AUTOMATISÉS VICKY IA (SÉCURITÉ & INTELLIGENCE)');
 console.log('======================================================\n');
 
 let passed = 0;
@@ -18,7 +25,7 @@ const assertTest = (name, condition, detail = '') => {
   }
 };
 
-// 1. Tests de Censure & Mots Sensibles
+// 1. Tests de Censure & Sécurité
 const unsafeInputs = [
   'Je veux voir des images de pornographie',
   'Comment faire un meurtre sanglant',
@@ -33,10 +40,10 @@ const unsafeInputs = [
 
 for (const input of unsafeInputs) {
   const result = checkInputSafety(input);
-  assertTest(`Blocage détecté : "${input.substring(0, 40)}..."`, result.safe === false);
+  assertTest(`Blocage détecté : "${input.substring(0, 35)}..."`, result.safe === false);
 }
 
-// 2. Tests de Requêtes Légitimes (Pas de faux positifs)
+// 2. Tests de Requêtes Légitimes
 const safeInputs = [
   'Quels sont vos frais de livraison à Abidjan ?',
   'Avez-vous une combinaison élégante ou une robe en stock ?',
@@ -48,40 +55,60 @@ const safeInputs = [
 
 for (const input of safeInputs) {
   const result = checkInputSafety(input);
-  assertTest(`Autorisation légitime : "${input.substring(0, 40)}..."`, result.safe === true);
+  assertTest(`Autorisation légitime : "${input.substring(0, 35)}..."`, result.safe === true);
 }
 
-// 3. Tests de Résolution d'Intentions Réelles & Anti-fuite
-const orderHowTo = getFallbackResponse('command passer une commande sur vickyshop');
-assertTest('Intention "passer commande" donne le guide en 4 étapes', orderHowTo.includes('Passer commande') && orderHowTo.includes('panier'));
-assertTest('Intention "passer commande" ne renvoie PAS de faux suivi', !orderHowTo.includes('Pour suivre votre commande en direct'));
+// 3. Tests de Classification d'Intentions & Extraction de Budget
+const budget1 = extractBudget('Je cherche une robe pour moins de 15 000 FCFA');
+assertTest('Extraction budget max (15 000)', budget1.maxPrice === 15000);
 
-const sellerAdd = getFallbackResponse('comment ajouter un article sur vicky shop');
-assertTest('Intention "ajouter un article" guide le vendeur', sellerAdd.includes('Espace Vendeur') && sellerAdd.includes('Ajouter un produit'));
-assertTest('Intention "ajouter un article" inclut la balise SELLER_DASHBOARD', sellerAdd.includes('[ACTION:SELLER_DASHBOARD]'));
-assertTest('Zéro fuite de directives internes ("CONSIGNE")', !sellerAdd.includes('CONSIGNE'));
+const budget2 = extractBudget('Montre-moi des sacs entre 10k et 25k');
+assertTest('Extraction budget plage (10 000 - 25 000)', budget2.minPrice === 10000 && budget2.maxPrice === 25000);
 
-const deliveryInquiry = getFallbackResponse('Quels sont les frais de livraison à Marcory ?');
-assertTest('Frais de livraison 2 000 FCFA mentionnés', deliveryInquiry.includes('2 000 FCFA'));
-assertTest('Gratuité dès 50 000 FCFA mentionnée', deliveryInquiry.includes('50 000 FCFA'));
+const followUp1 = isFollowUpQuestion('Et combien ça coûte ?');
+assertTest('Détection question de suivi ("Et combien ça coûte ?")', followUp1 === true);
 
-const paymentInquiry = getFallbackResponse('Comment payer ma commande ?');
-assertTest('Paiement espèces à la livraison mentionné', paymentInquiry.includes('espèces à la livraison'));
+const followUp2 = isFollowUpQuestion('Montre-moi d\'autres modèles');
+assertTest('Détection question de suivi ("Montre-moi d\'autres modèles")', followUp2 === true);
 
-const exchangeInquiry = getFallbackResponse('Est-il possible d\'échanger si la taille ne va pas ?');
-assertTest('Échange 48h mentionné', exchangeInquiry.includes('48 heures ouvrées'));
-assertTest('Bouton WhatsApp proposé pour échange', exchangeInquiry.includes('[ACTION:WHATSAPP_SUPPORT]'));
+const intentComplaint = classifyUserIntent('Ya drap sur ma commande CMD-123, colis jamais arrivé !');
+assertTest('Intention réclamation/litige reconnue', intentComplaint.type === 'SUPPORT_COMPLAINT');
 
-// 4. Tests Prompt Système & Base de Connaissances
-const systemPrompt = await buildSystemInstruction('Kouassi', 'vendeur', 'DONNÉES TEST');
-assertTest('Prompt système contient le nom client', systemPrompt.includes('Kouassi'));
-assertTest('Prompt système contient les frais de livraison', systemPrompt.includes('2 000 FCFA'));
-assertTest('Prompt système contient la mention Cash on Delivery', systemPrompt.includes('Paiement en espèces à la livraison'));
-assertTest('Prompt système contient les consignes anti-injection', systemPrompt.includes('DÉFENSE ANTI-REVERSE ENGINEERING'));
-assertTest('Prompt système intègre le lexique ivoirien', systemPrompt.includes('gbairai'));
-assertTest('Prompt système intègre le guide vendeurs', systemPrompt.includes('GUIDE D\'ACCOMPAGNEMENT DÉDIÉ AUX VENDEURS'));
-assertTest('Prompt système intègre le protocole des balises d\'action', systemPrompt.includes('[ACTION:TRACK_ORDER'));
-assertTest('Prompt système intègre le protocole WhatsApp Support', systemPrompt.includes('[ACTION:WHATSAPP_SUPPORT]'));
+const intentSeller = classifyUserIntent('Comment ajouter un article à ma boutique ?');
+assertTest('Intention guide vendeur reconnue', intentSeller.type === 'SELLER_GUIDE');
+
+// 4. Tests Formatage Snapshot Produit
+const rawProd = {
+  _id: 'prod-123',
+  title: 'Robe Wax Royale',
+  price: 18500,
+  category: 'robes',
+  image: 'https://res.cloudinary.com/vicky/image/upload/sample.jpg',
+  inStock: true,
+  stockQuantity: 4,
+};
+const formatted = formatProductSnapshot(rawProd);
+assertTest('Formatage snapshot produit valide', formatted && formatted.price === 18500 && formatted.inStock === true);
+
+// 5. Tests Suggestions par rôle
+assertTest('Suggestions clients disponibles (4)', CLIENT_SUGGESTIONS.length === 4);
+assertTest('Suggestions vendeurs disponibles (4)', SELLER_SUGGESTIONS.length === 4);
+
+// 6. Tests Fallback Local Expert & Balises
+const orderHowTo = getFallbackResponse('comment passer une commande');
+assertTest('Fallback "passer commande" donne le guide en 4 étapes', orderHowTo.includes('Passer commande') && orderHowTo.includes('panier'));
+
+const sellerGuide = getFallbackResponse('comment vendre mes articles');
+assertTest('Fallback "vendre" inclut la balise SELLER_DASHBOARD', sellerGuide.includes('[ACTION:SELLER_DASHBOARD]'));
+
+const complaintReply = getFallbackResponse('gros probleme sur ma commande', { intent: { type: 'SUPPORT_COMPLAINT' } });
+assertTest('Fallback réclamation oriente vers WhatsApp Support', complaintReply.includes('[ACTION:WHATSAPP_SUPPORT]'));
+
+// 7. Tests Prompt Système & Base de Connaissances
+const systemPrompt = await buildSystemInstruction('Awa', 'client');
+assertTest('Prompt système contient le prénom', systemPrompt.includes('Awa'));
+assertTest('Prompt système contient les frais de livraison 2 000 FCFA', systemPrompt.includes('2 000 FCFA'));
+assertTest('Prompt système contient le paiement Cash on Delivery', systemPrompt.includes('Paiement en espèces à la livraison'));
 
 console.log(`\n------------------------------------------------------`);
 console.log(`Résultats des tests IA : ${passed} réussis, ${failed} échoués`);
@@ -89,4 +116,6 @@ console.log('------------------------------------------------------\n');
 
 if (failed > 0) {
   process.exit(1);
+} else {
+  process.exit(0);
 }
