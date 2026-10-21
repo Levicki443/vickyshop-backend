@@ -77,6 +77,18 @@ assertTest('Intention réclamation/litige reconnue', intentComplaint.type === 'S
 const intentSeller = classifyUserIntent('Comment ajouter un article à ma boutique ?');
 assertTest('Intention guide vendeur reconnue', intentSeller.type === 'SELLER_GUIDE');
 
+const intentAbout = classifyUserIntent("C'est quoi VickyShop et comment ça marche ?");
+assertTest('Intention présentation plateforme reconnue', intentAbout.type === 'PLATFORM_ABOUT');
+
+const intentReview = classifyUserIntent('Comment laisser un avis vérifié sur un article ?');
+assertTest('Intention guide avis client reconnue', intentReview.type === 'REVIEW_GUIDE');
+
+const intentReco = classifyUserIntent('Je cherche une idée de cadeau pour ma mère');
+assertTest('Intention recommandation/conseil reconnue', intentReco.type === 'RECOMMENDATION_SEEK');
+
+const intentEnglish = classifyUserIntent('I want to buy shoes under 20000 FCFA');
+assertTest('Intention recherche en anglais reconnue', intentEnglish.type === 'PRODUCT_SEARCH');
+
 // 4. Tests Formatage Snapshot Produit
 const rawProd = {
   _id: 'prod-123',
@@ -104,11 +116,21 @@ assertTest('Fallback "vendre" inclut la balise SELLER_DASHBOARD', sellerGuide.in
 const complaintReply = getFallbackResponse('gros probleme sur ma commande', { intent: { type: 'SUPPORT_COMPLAINT' } });
 assertTest('Fallback réclamation oriente vers WhatsApp Support', complaintReply.includes('[ACTION:WHATSAPP_SUPPORT]'));
 
+const platformAboutReply = getFallbackResponse('C\'est quoi VickyShop ?', { intent: { type: 'PLATFORM_ABOUT' } });
+assertTest('Fallback présentation plateforme valide', platformAboutReply.includes('marketplace de mode') && platformAboutReply.includes('Vicky-Shop'));
+
+const reviewReply = getFallbackResponse('Comment noter un vendeur et laisser un avis ?', { intent: { type: 'REVIEW_GUIDE' } });
+assertTest('Fallback avis explique le badge Achat Vérifié', reviewReply.includes('Achat Vérifié') && reviewReply.includes('étoiles'));
+
+const englishReply = getFallbackResponse('I want to track my order', { intent: { type: 'ORDER_TRACKING' } });
+assertTest('Fallback répond en anglais pour requêtes anglophones', englishReply.includes('track your order') || englishReply.includes('order number'));
+
 // 7. Tests Prompt Système & Base de Connaissances
 const systemPrompt = await buildSystemInstruction('Awa', 'client');
 assertTest('Prompt système contient le prénom', systemPrompt.includes('Awa'));
 assertTest('Prompt système contient les frais de livraison 2 000 FCFA', systemPrompt.includes('2 000 FCFA'));
 assertTest('Prompt système contient le paiement Cash on Delivery', systemPrompt.includes('Paiement en espèces à la livraison'));
+assertTest('Prompt système contient l\'interdiction stricte d\'inventer', systemPrompt.includes('N\'invente JAMAIS'));
 
 console.log(`\n------------------------------------------------------`);
 console.log(`Résultats des tests IA : ${passed} réussis, ${failed} échoués`);

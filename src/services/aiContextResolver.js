@@ -112,11 +112,22 @@ export const resolveDynamicContext = async ({
             label: `Suivre la commande ${o.orderNumber}`,
           });
         });
+      } else if (!user || !user._id) {
+        actions.push({
+          type: 'AUTH_MODAL',
+          param: '',
+          label: 'Se connecter pour voir mes commandes',
+        });
       }
     }
 
     // 2. Recherche et recommandation dans le catalogue réel
-    if (intent.type === 'PRODUCT_SEARCH' || intent.type === 'PRODUCT_COMPARE' || intent.isFollowUp) {
+    if (
+      intent.type === 'PRODUCT_SEARCH' ||
+      intent.type === 'PRODUCT_COMPARE' ||
+      intent.type === 'RECOMMENDATION_SEEK' ||
+      intent.isFollowUp
+    ) {
       const effectiveQuery = intent.isFollowUp && previousSubject ? `${previousSubject} ${message}` : message;
 
       if (intent.type === 'PRODUCT_COMPARE') {
@@ -165,7 +176,7 @@ export const resolveDynamicContext = async ({
       }
     }
 
-    // 3. Espace Vendeur connecté
+    // 3. Espace Vendeur connecté ou orientation inscription vendeur
     if (user && (user.role === 'vendeur' || user.role === 'admin')) {
       const sellerProductCount = await Product.countDocuments({ seller: user._id });
       contextParts.push(`ESPACE VENDEUR DE L'UTILISATEUR (${user.name}) : ${sellerProductCount} article(s) publié(s).`);
@@ -174,9 +185,24 @@ export const resolveDynamicContext = async ({
         param: '',
         label: 'Ouvrir mon Espace Vendeur',
       });
+    } else if (intent.type === 'SELLER_GUIDE') {
+      actions.push({
+        type: 'SELLER_REGISTER',
+        param: '',
+        label: 'Créer un compte vendeur',
+      });
     }
 
-    // 4. Action de support WhatsApp pour les réclamations
+    // 4. Découverte de la plateforme
+    if (intent.type === 'PLATFORM_ABOUT') {
+      actions.push({
+        type: 'EXPLORE_CATALOG',
+        param: '',
+        label: 'Découvrir la boutique',
+      });
+    }
+
+    // 5. Action de support WhatsApp pour les réclamations
     if (intent.type === 'SUPPORT_COMPLAINT' || intent.type === 'EXCHANGE_RETURN') {
       actions.push({
         type: 'WHATSAPP_SUPPORT',

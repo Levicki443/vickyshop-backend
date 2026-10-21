@@ -93,59 +93,74 @@ export const classifyUserIntent = (rawText = '', previousSubject = null) => {
   const isFollowUp = isFollowUpQuestion(rawText);
 
   // 1. Réclamation / Problème / Support humain
-  if (/\b(drap|litige|probleme|reclamation|plainte|arnaque|erreur|abime|vole|trompe)\b/.test(norm)) {
+  if (/\b(drap|litige|probleme|reclamation|plainte|arnaque|erreur|abime|vole|trompe|scam|fraud|complaint)\b/.test(norm)) {
     return { type: 'SUPPORT_COMPLAINT', budget, isFollowUp };
   }
 
-  // 2. Gestion Vendeur & Ajout d'articles
+  // 2. Présentation générale & Différence client/vendeur
+  if (/\b(c['’]est quoi (?:vicky|vickyshop)|qui etes vous|presentation|comment fonctionne (?:vicky|vickyshop|la plateforme)|pourquoi (?:vicky|vickyshop)|avantages?|difference client vendeur|what is (?:vicky|vickyshop))\b/.test(norm)) {
+    return { type: 'PLATFORM_ABOUT', budget, isFollowUp };
+  }
+
+  // 3. Avis clients & Étoiles
+  if (/\b(avis|noter|etoile|commentaire|avis verifie|review|rating|feedback)\b/.test(norm)) {
+    return { type: 'REVIEW_GUIDE', budget, isFollowUp };
+  }
+
+  // 4. Gestion Vendeur & Ajout d'articles
   if (
-    (/\b(vendre|vendeur|boutique|djandjou|fournisseur)\b/.test(norm) ||
+    (/\b(vendre|vendeur|boutique|djandjou|fournisseur|how to sell|seller)\b/.test(norm) ||
       (/\b(ajouter|creer|publier|mettre en vente|enregistrer)\b/.test(norm) &&
         /\b(article|produit|robe|chaussure|catalogue|photo)\b/.test(norm)))
   ) {
     return { type: 'SELLER_GUIDE', budget, isFollowUp };
   }
 
-  // 3. Suivi de commande
-  if (hasOrderCode || /\b(suivre|suivi|statut|colis|arrive quand|ou est mon colis|ou en est)\b/.test(norm)) {
+  // 5. Suivi de commande
+  if (hasOrderCode || /\b(suivre|suivi|statut|colis|arrive quand|ou est mon colis|ou en est|track|tracking|where is my order)\b/.test(norm)) {
     return { type: 'ORDER_TRACKING', budget, isFollowUp, orderCode: rawText.match(ORDER_CODE_REGEX)?.[1] || null };
   }
 
-  // 4. Comment commander / Guide d'achat
+  // 6. Comment commander / Guide d'achat
   if (
-    /\b(comment|passer|faire|effectuer|valider)\b/.test(norm) &&
-    /\b(commande|commander|achat|acheter)\b/.test(norm)
+    (/\b(comment|passer|faire|effectuer|valider|how to)\b/.test(norm) &&
+    /\b(commande|commander|achat|acheter|buy|order)\b/.test(norm))
   ) {
     return { type: 'ORDER_GUIDE', budget, isFollowUp };
   }
 
-  // 5. Modalités de paiement (Cash on Delivery)
-  if (/\b(paiement|payer|especes|cash|argent|regler|orange money|wave|moov|mtn|carte bancaire)\b/.test(norm)) {
+  // 7. Modalités de paiement (Cash on Delivery)
+  if (/\b(paiement|payer|especes|cash|argent|regler|orange money|wave|moov|mtn|carte bancaire|payment|pay)\b/.test(norm)) {
     return { type: 'PAYMENT_INFO', budget, isFollowUp };
   }
 
-  // 6. Frais et délais de livraison
-  if (/\b(livraison|frais|delai|expedition|vous livrez|abidjan|yopougon|cocody|koumassi|marcory|bouake)\b/.test(norm)) {
+  // 8. Frais et délais de livraison
+  if (/\b(livraison|frais|delai|expedition|vous livrez|abidjan|yopougon|cocody|koumassi|marcory|bouake|delivery|shipping|ship)\b/.test(norm)) {
     return { type: 'DELIVERY_INFO', budget, isFollowUp };
   }
 
-  // 7. Échanges, tailles et retours sous 48h
-  if (/\b(echange|echanger|taille|pointure|retour|retourner|essayer|essayage|rembourser)\b/.test(norm)) {
+  // 9. Échanges, tailles et retours sous 48h
+  if (/\b(echange|echanger|taille|pointure|retour|retourner|essayer|essayage|rembourser|return|exchange|refund)\b/.test(norm)) {
     return { type: 'EXCHANGE_RETURN', budget, isFollowUp };
   }
 
-  // 8. Comparaison de produits
-  if (/\b(comparer|comparaison|difference|lequel est mieux|laquelle est mieux|le meilleur entre)\b/.test(norm)) {
+  // 10. Recommandations personnalisées & Idées cadeaux
+  if (/\b(conseille|recommande|idee\s+(?:de\s+)?cadeau|pour un cadeau|cadeau|choisir|selectionne|recommend|gift)\b/.test(norm)) {
+    return { type: 'RECOMMENDATION_SEEK', budget, isFollowUp };
+  }
+
+  // 11. Comparaison de produits
+  if (/\b(comparer|comparaison|difference|lequel est mieux|laquelle est mieux|le meilleur entre|compare)\b/.test(norm)) {
     return { type: 'PRODUCT_COMPARE', budget, isFollowUp };
   }
 
-  // 9. Création de compte / Connexion
-  if (/\b(creer un compte|inscription|inscrire|connexion|connecter|mot de passe|mon compte)\b/.test(norm)) {
+  // 12. Création de compte / Connexion
+  if (/\b(creer un compte|inscription|inscrire|connexion|connecter|mot de passe|mon compte|login|signup|register)\b/.test(norm)) {
     return { type: 'ACCOUNT_INFO', budget, isFollowUp };
   }
 
-  // 10. Recherche produit (explicite ou par budget ou question de suivi)
-  const hasProductKeywords = /\b(produit|article|robe|chaussure|sac|pantalon|chemise|veste|montre|prix|combien|stock|disponible|modele|catalogue)\b/.test(norm);
+  // 13. Recherche produit (explicite ou par budget ou question de suivi)
+  const hasProductKeywords = /\b(produit|article|robe|chaussure|sac|pantalon|chemise|veste|montre|prix|combien|stock|disponible|modele|catalogue|shoes|dress|pants|shirt|bag)\b/.test(norm);
   if (hasProductKeywords || budget.maxPrice !== null || budget.minPrice !== null || (isFollowUp && previousSubject)) {
     return { type: 'PRODUCT_SEARCH', budget, isFollowUp };
   }

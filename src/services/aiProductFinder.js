@@ -7,18 +7,35 @@ import { normalizeText, KNOWN_CATEGORIES } from './aiIntentClassifier.js';
  * de produits réels depuis le catalogue MongoDB de Vicky-Shop.
  */
 
+const ENGLISH_TO_FRENCH = {
+  shoes: 'chaussures',
+  shoe: 'chaussures',
+  dress: 'robes',
+  dresses: 'robes',
+  pants: 'pantalons',
+  shirt: 'chemises',
+  bag: 'sacs',
+  bags: 'sacs',
+  watch: 'montres',
+  suit: 'costumes',
+  men: 'homme',
+  women: 'femme',
+};
+
 // Nettoie et extrait les mots signifiants d'une requête utilisateur
 export const extractSearchTerms = (rawText = '') => {
   const norm = normalizeText(rawText);
   const stopWords = new Set([
     'quel', 'quels', 'quelle', 'quelles', 'sont', 'votre', 'vos', 'avez', 'combien',
     'avoir', 'avec', 'pour', 'dans', 'chez', 'vous', 'montre', 'moi', 'donne', 'prix',
-    'veux', 'cherche', 'trouver', 'avoir', 'acheter', 'catalogue', 'boutique', 'vicky', 'shop'
+    'veux', 'cherche', 'trouver', 'avoir', 'acheter', 'catalogue', 'boutique', 'vicky', 'shop',
+    'what', 'how', 'much', 'the', 'and', 'for', 'any'
   ]);
 
   return norm
     .replace(/[^\w\s-]/gi, ' ')
     .split(/\s+/)
+    .map((w) => ENGLISH_TO_FRENCH[w] || w)
     .filter((w) => w.length > 2 && !stopWords.has(w));
 };
 
